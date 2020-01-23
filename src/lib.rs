@@ -3,6 +3,8 @@ use tokio::{io::BufReader, net::TcpStream};
 pub mod error;
 mod handshake;
 use handshake::{HandshakeProcessResult, Handshake, PeerType};
+use rml_amf0::{Amf0Value, serialize, deserialize};
+use std::collections::HashMap;
 
 pub struct Connection<T = TcpStream> {
     url: String,
@@ -17,6 +19,29 @@ impl<Transport: AsyncRead + AsyncWrite + Unpin> Connection<Transport> {
         cn: BufReader::new(transport),
       }
     }
+
+    // TODO: param => params: &[Amf0Value]
+    pub async fn send_command(&mut self, command_name: String, param: Amf0Value) -> Result<(), Box<dyn std::error::Error>> {
+        let transaction_id:f64 = 1.0;   // connect message is always 1, I think we increment from here
+        let mut values = vec![
+            Amf0Value::Utf8String(command_name),
+            Amf0Value::Number(transaction_id),
+            param       // connect has one param, should allow array
+        ];
+    
+        let bytes = rml_amf0::serialize(&values).expect("serialize command data");
+        self.cn.write(&bytes).await.expect("write Amf command");
+
+        let mut read_buffer = [0_u8; 1024];     // TODO: use Bytes?
+        let num_bytes = self.cn.read(&mut read_buffer).await.expect("read command result");
+        if num_bytes == 0 {
+            panic!("connection unexpectedly closed");   // TODO: return real error
+        } else {
+            println!("got {} bytes", num_bytes);
+        }
+        Ok(())
+    }
+
     //pub async fn connect(&mut self) -> Result<(), Error> {
     // error[E0412]: cannot find type `Error` in this scope
     pub async fn connect(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -44,9 +69,23 @@ impl<Transport: AsyncRead + AsyncWrite + Unpin> Connection<Transport> {
                 break; 
             }
         }
+        println!("getting ready to send connect command");
+        let mut properties = HashMap::new();
+        //TODO -- why send "app" here?
+        //properties.insert("app".to_string(), Amf0Value::Utf8String(app_name));
+        let flash_version = "WIN 23,0,0,207".to_string();   // TODO: must we, really?
+        properties.insert("flashVer".to_string(), Amf0Value::Utf8String(flash_version));
+        properties.insert("objectEncoding".to_string(), Amf0Value::Number(0.0));
+        properties.insert("tcUrl".to_string(), Amf0Value::Utf8String("rtmp://localhost:1935/live".to_string()));
 
-        Ok(())
+        //let params = [Amf0Value::Object(properties)];
+        // TODO: Amf0Value - should implement Copy, & API shouldn't need copy
+        let result = self.send_command("connect".to_string(), Amf0Value::Object(properties)).await;
+        println!("send_command result: {:?}", result);
+        result
     }
   
+
+
 }
 
