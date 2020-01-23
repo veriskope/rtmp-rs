@@ -232,6 +232,7 @@ impl Handshake {
     }
 
     fn parse_p0(&mut self) -> Result<HandshakeProcessResult, HandshakeError> {
+        println!("parse_p0");
         if self.input_buffer.len() == 0 {
             return Ok(HandshakeProcessResult::InProgress {response_bytes: Vec::new()});
         }
@@ -246,6 +247,7 @@ impl Handshake {
     }
 
     fn parse_p1(&mut self) -> Result<HandshakeProcessResult, HandshakeError> {
+        println!("parse_p1");
         if self.input_buffer.len() < RTMP_PACKET_SIZE {
             return Ok(HandshakeProcessResult::InProgress {response_bytes: Vec::new()});
         }
@@ -266,6 +268,7 @@ impl Handshake {
         let mut reader = Cursor::new(received_packet_1.as_ref());
         let _ = reader.read_u32::<BigEndian>()?;
         let version = reader.read_u32::<BigEndian>()?;
+        println!("version: {}", version);
 
         // Test against the expected constant string the peer sent over
         let p1_key = match self.peer_type {

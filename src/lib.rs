@@ -24,8 +24,26 @@ impl<Transport: AsyncRead + AsyncWrite + Unpin> Connection<Transport> {
         let mut handshake = Handshake::new(PeerType::Client);
         let c0_and_c1 = handshake.generate_outbound_p0_and_p1().unwrap();
         self.cn.write(&c0_and_c1).await.expect("write c0_and_c1");
-    
-    
+        
+        let mut read_buffer = [0_u8; 1024];
+        loop {
+            let num_bytes = self.cn.read(&mut read_buffer).await.expect("read");
+            if num_bytes == 0 {
+                panic!("connection unexpectedly closed");   // TODO: return real error
+            }
+            println!("bytes read: {}", num_bytes);
+                let (is_finished, response_bytes) = match handshake.process_bytes(&read_buffer) {
+                Err(x) => panic!("Error returned: {:?}", x),
+                Ok(HandshakeProcessResult::InProgress {response_bytes: bytes}) => (false, bytes),
+                Ok(HandshakeProcessResult::Completed {response_bytes: bytes, remaining_bytes: _}) => (true, bytes)
+            };
+            if response_bytes.len() > 0 {
+                self.cn.write(&response_bytes).await.unwrap(); // TODO: return error??
+            }
+            if is_finished { 
+                break; 
+            }
+        }
 
         Ok(())
     }
