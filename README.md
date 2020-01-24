@@ -1,3 +1,10 @@
+## Running the example
+
+with logging...
+```
+RUST_LOG=trace  cargo run --example connect
+```
+
 ## Work in progress
 
 Thinking that an API that looks like this would be nice

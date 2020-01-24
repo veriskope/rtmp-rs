@@ -1,7 +1,11 @@
 use tokio::net::TcpStream;
+extern crate pretty_env_logger;
+#[macro_use] extern crate log;
 
 #[tokio::main]
 async fn main() {
+  pretty_env_logger::init();
+
   let addr = "127.0.0.1:1935";
   // let tcp = TcpStream::connect(addr).await?;
   // cannot use the `?` operator in a function that returns `()`

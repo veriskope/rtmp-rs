@@ -29,12 +29,13 @@ mod errors;
 
 pub use self::errors::{HandshakeError, HandshakeErrorKind};
 
-use std::io::{Cursor};
 use byteorder::{BigEndian, ReadBytesExt};
+use hmac::{Hmac, Mac};
+use log::{info, warn};
 use rand;
 use rand::Rng;
 use sha2::Sha256;
-use hmac::{Hmac, Mac};
+use std::io::{Cursor};
 
 const RTMP_PACKET_SIZE: usize = 1536;
 const SHA256_DIGEST_LENGTH : usize = 32;
@@ -232,7 +233,7 @@ impl Handshake {
     }
 
     fn parse_p0(&mut self) -> Result<HandshakeProcessResult, HandshakeError> {
-        println!("parse_p0");
+        info!(target: "handshake", "parse_p0");
         if self.input_buffer.len() == 0 {
             return Ok(HandshakeProcessResult::InProgress {response_bytes: Vec::new()});
         }
@@ -247,7 +248,7 @@ impl Handshake {
     }
 
     fn parse_p1(&mut self) -> Result<HandshakeProcessResult, HandshakeError> {
-        println!("parse_p1");
+        info!(target: "handshake", "parse_p1");
         if self.input_buffer.len() < RTMP_PACKET_SIZE {
             return Ok(HandshakeProcessResult::InProgress {response_bytes: Vec::new()});
         }
@@ -268,7 +269,7 @@ impl Handshake {
         let mut reader = Cursor::new(received_packet_1.as_ref());
         let _ = reader.read_u32::<BigEndian>()?;
         let version = reader.read_u32::<BigEndian>()?;
-        println!("version: {}", version);
+        info!(target: "handshake", "version: {}", version);
 
         // Test against the expected constant string the peer sent over
         let p1_key = match self.peer_type {
@@ -314,10 +315,12 @@ impl Handshake {
         }
 
         self.current_stage = Stage::WaitingForPacket2;
+        info!(target: "handshake", "current_stage = Stage::WaitingForPacket2");
         Ok(HandshakeProcessResult::InProgress {response_bytes: output_packet.to_vec()})
     }
 
     fn parse_p2(&mut self) -> Result<HandshakeProcessResult, HandshakeError> {
+        info!(target: "handshake", "parse_p2");
         if self.input_buffer.len() < RTMP_PACKET_SIZE {
             return Ok(HandshakeProcessResult::InProgress {response_bytes: Vec::new()});
         }
@@ -365,6 +368,7 @@ impl Handshake {
         //}
 
         self.current_stage = Stage::Complete;
+        info!(target: "handshake", "complete");
         let bytes_left = self.input_buffer.drain(..).collect();
         Ok(HandshakeProcessResult::Completed {
             response_bytes: Vec::new(),

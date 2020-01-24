@@ -3,6 +3,7 @@ use tokio::{io::BufReader, net::TcpStream};
 pub mod error;
 mod handshake;
 use handshake::{HandshakeProcessResult, Handshake, PeerType};
+use log::{info, warn};
 use rml_amf0::{Amf0Value, serialize, deserialize};
 use std::collections::HashMap;
 
@@ -14,6 +15,7 @@ pub struct Connection<T = TcpStream> {
 impl<Transport: AsyncRead + AsyncWrite + Unpin> Connection<Transport> {
     // consider passing ConnectionOptions with transport? and (URL | parts)
     pub fn new(url: String, transport: Transport) -> Self {
+      info!(target: "rtmp::Connection", "new");
       Connection {
         url,
         cn: BufReader::new(transport),
@@ -22,6 +24,8 @@ impl<Transport: AsyncRead + AsyncWrite + Unpin> Connection<Transport> {
 
     // TODO: param => params: &[Amf0Value]
     pub async fn send_command(&mut self, command_name: String, param: Amf0Value) -> Result<(), Box<dyn std::error::Error>> {
+        info!(target: "rtmp::Connection", "send_command");
+
         let transaction_id:f64 = 1.0;   // connect message is always 1, I think we increment from here
         let mut values = vec![
             Amf0Value::Utf8String(command_name),
@@ -30,14 +34,20 @@ impl<Transport: AsyncRead + AsyncWrite + Unpin> Connection<Transport> {
         ];
     
         let bytes = rml_amf0::serialize(&values).expect("serialize command data");
-        self.cn.write(&bytes).await.expect("write Amf command");
+        let bytes_written = self.cn.write(&bytes).await.expect("write Amf command");
+        if bytes_written == 0 {
+            panic!("connection unexpectedly closed");   // TODO: return real error
+        } else {
+            info!(target: "rtmp::Connection", "wrote {} bytes", bytes_written);
+        }
+        self.cn.flush().await.expect("send_command: flush after write");
 
         let mut read_buffer = [0_u8; 1024];     // TODO: use Bytes?
         let num_bytes = self.cn.read(&mut read_buffer).await.expect("read command result");
         if num_bytes == 0 {
             panic!("connection unexpectedly closed");   // TODO: return real error
         } else {
-            println!("got {} bytes", num_bytes);
+            info!(target: "rtmp::Connection", "read {} bytes", num_bytes);
         }
         Ok(())
     }
