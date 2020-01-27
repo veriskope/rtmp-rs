@@ -31,7 +31,7 @@ pub use self::errors::{HandshakeError, HandshakeErrorKind};
 
 use byteorder::{BigEndian, ReadBytesExt};
 use hmac::{Hmac, Mac};
-use log::{info, warn};
+use log::{info};
 use rand;
 use rand::Rng;
 use sha2::Sha256;
