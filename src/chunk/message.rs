@@ -1,7 +1,5 @@
-use std::collections::HashMap;
 use tokio::prelude::*;
 extern crate proc_macro;
-//use crate::chunk::amf::Value;
 use log::info;
 use super::amf::Value;
 
@@ -85,11 +83,12 @@ mod tests {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
     use crate::util::bytes_from_hex_string;
+    use std::collections::HashMap;
 
   #[tokio::test]
   async fn can_read_command_message() {
     // std::env::set_var("RUST_LOG", "trace");
-    std::env::set_var("RUST_LOG", "info");
+    // std::env::set_var("RUST_LOG", "info");
     pretty_env_logger::init();
      // 02 00 07 5f 72 65 73 75  6c 74  Utf8("_result")
      // 00 3f f0 00 00 00 00 00 00      Number(1.0)

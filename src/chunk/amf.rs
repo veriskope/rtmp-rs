@@ -178,37 +178,40 @@ impl Value {
   where T: AsyncRead + Unpin
   {
     let marker: u8 = reader.read_u8().await.expect("read AMF type marker");
-    match Marker::from_u8(marker) {
+    let value = match Marker::from_u8(marker) {
       Some(Utf8String) => {
+        trace!(target: "amf::Value::read", "Utf8String");
         let s = Value::read_string(&mut reader).await.expect("read Amf0 Utf8String");
-        Ok(Value::Utf8(s))
+        Value::Utf8(s)
       },
       Some(Number) => {
         trace!(target: "amf::Value::read", "Number");
         let n = Value::read_number(&mut reader).await.expect("read Amf0 Number");
-        Ok(Value::Number(n))
+        Value::Number(n)
       },
       Some(Boolean) => {
         trace!(target: "amf::Value::read", "Boolean");
         let b = Value::read_bool(&mut reader).await.expect("read Amf0 Boolean"); 
-        Ok(Value::Boolean(b))
+        Value::Boolean(b)
       },
       Some(Object) => {
         trace!(target: "amf::Value::read", "Object");
         let hash = Value::read_object(&mut reader).await.expect("read Amf0 Object"); 
-        Ok(Value::Object(hash))
+        Value::Object(hash)
       },
       Some(EcmaArray) => {
         trace!(target: "amf::Value::read", "EcmaArray, skip 4 bytes then read object (!)");
         let fake_len = reader.read_u32().await.expect("ecma array length -- unused?");
         trace!(target: "amf::Value::read", "ignoring u32 {:?}", fake_len);
         let hash = Value::read_object(&mut reader).await.expect("read Amf0 Object"); 
-        Ok(Value::Object(hash))
+        Value::Object(hash)
       },
 
       Some(t)   => panic!("umimplemented AMf0 type: {:?}", t),
       _         => panic!("unexpected AMf0 type: {}", marker)
-    } // match Marker
+    }; // match Marker
+    info!(target: "amf::Value::read", "read value: {:?}", value);
+    Ok(value)
   } // pub async fn read
 } // impl Value
 

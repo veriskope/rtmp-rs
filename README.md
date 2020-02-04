@@ -7,12 +7,17 @@ cargo +nightly build
 
 with logging...
 ```
+RUST_LOG=info  cargo +nightly run --example connect
+```
+
+with crazy amount of logging...
+```
 RUST_LOG=trace  cargo +nightly run --example connect
 ```
 
-run tests with logging:
+run specific test with logging (see note below about enabling from code):
 ```
-RUST_LOG=trace  cargo +nightly test
+RUST_LOG=trace cargo +nightly test can_read_command_message
 ```
 
 ## Work in progress
@@ -37,6 +42,7 @@ async fn main() {
 
 ## TODO
 
+- how to run some code before test run?  (currently need to add     `pretty_env_logger::init();` in the code of the test)
 - I've gotten a bit fast-and-loose with adding crates, would like to consider
   reducing dependencies once the basics are working
 - maybe use procedural macro to implement reading/writing of chunks with less 
