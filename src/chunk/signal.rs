@@ -1,6 +1,9 @@
 use tokio::prelude::*;
 extern crate proc_macro;
 
+extern crate num_traits;
+use num_traits::FromPrimitive;
+
 // TODO: can we just derive Read on these, given that we know type?
 #[derive(Debug, PartialEq)]
 pub enum Signal {
@@ -14,6 +17,7 @@ pub enum Signal {
 
 // the table of constants could be merged with Enum declaration with
 // https://github.com/rust-lang/rust/issues/60553
+#[derive(Debug, PartialEq, Primitive)]
 pub enum SignalType {
   SetChunkSize        = 01,
   Abort               = 02,
@@ -22,33 +26,34 @@ pub enum SignalType {
   SetWindowAckSize    = 05,
   SetPeerBandwidth       = 06,
 }
+use SignalType::*;
 
 impl Signal {
   pub async fn read<T>(mut reader: T, chunk_type: u8) -> io::Result<Signal>
   where T: AsyncRead + Unpin
   {
-    let signal: Signal = match chunk_type { // TODO: how to match SignalType
-        1 => {  
+    let signal: Signal = match SignalType::from_u8(chunk_type) { // TODO: how to match SignalType
+        Some(SetChunkSize) => {  
           let size = reader.read_u32().await?;
           Signal::SetChunkSize(size)
         },
-        2 => {  
+        Some(Abort) => {  
           let data = reader.read_u32().await?;
           Signal::Abort(data)
         },
-        3 => {  
+        Some(AckChunk) => {  
           let data = reader.read_u32().await?;
           Signal::AckChunk(data)
         },
-        4 => {  
+        Some(UserControlMessage) => {  
           let data = reader.read_u16().await?;
           Signal::UserControlMessage(data)
         },
-        5 => {  
+        Some(SetWindowAckSize) => {  
           let window_size = reader.read_u32().await?;
           Signal::SetWindowAckSize(window_size)
         },
-        6 => {
+        Some(SetPeerBandwidth) => {
           let window_size = reader.read_u32().await?;
           let limit_type = reader.read_u8().await?;     // TODO: make enum
           Signal::SetPeerBandwidth(window_size, limit_type)
@@ -65,7 +70,6 @@ impl Signal {
 mod tests {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
-    use SignalType::*;
 
   #[tokio::test]
   async fn can_read_abort() {
