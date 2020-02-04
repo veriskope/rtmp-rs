@@ -70,7 +70,7 @@ pub enum HandshakeProcessResult {
 #[derive(Debug, Eq, PartialEq)]
 pub enum PeerType {
     /// Handshake being represented as a server
-    Server,
+    _Server,    // server code not being used right now
 
     /// Handshake being represented as a client
     Client
@@ -148,7 +148,7 @@ impl Handshake {
         self.sent_p1[7] = ADOBE_VERSION[3];
 
         let (digest_offset, constant_key) = match self.peer_type {
-            PeerType::Server => (get_server_digest_offset(&self.sent_p1), GENUINE_FMS_CONST),
+            PeerType::_Server => (get_server_digest_offset(&self.sent_p1), GENUINE_FMS_CONST),
             PeerType::Client => (get_client_digest_offset(&self.sent_p1), GENUINE_FP_CONST),
         };
 
@@ -273,7 +273,7 @@ impl Handshake {
 
         // Test against the expected constant string the peer sent over
         let p1_key = match self.peer_type {
-            PeerType::Server => GENUINE_FP_CONST.as_bytes().to_vec(),
+            PeerType::_Server => GENUINE_FP_CONST.as_bytes().to_vec(),
             PeerType::Client => GENUINE_FMS_CONST.as_bytes().to_vec(),
         };
 
@@ -300,7 +300,7 @@ impl Handshake {
         fill_with_random_data(&mut output_packet);
 
         let mut p2_key = match self.peer_type {
-            PeerType::Server => GENUINE_FMS_CONST.as_bytes().to_vec(),
+            PeerType::_Server => GENUINE_FMS_CONST.as_bytes().to_vec(),
             PeerType::Client => GENUINE_FP_CONST.as_bytes().to_vec(),
         };
 
@@ -347,7 +347,7 @@ impl Handshake {
 
         // Not an exact match, so test the signature
         let mut peer_key = match self.peer_type {
-            PeerType::Server => GENUINE_FP_CONST.as_bytes().to_vec(),
+            PeerType::_Server => GENUINE_FP_CONST.as_bytes().to_vec(),
             PeerType::Client => GENUINE_FMS_CONST.as_bytes().to_vec()
         };
 
@@ -477,14 +477,14 @@ mod tests {
 
     #[test]
     fn can_start_client_handshake() {
-        let handshake = Handshake::new(PeerType::Server);
+        let handshake = Handshake::new(PeerType::_Server);
 
         assert_eq!(handshake.current_stage, Stage::NeedToSendP0AndP1);
     }
 
     #[test]
     fn bad_version_if_first_byte_is_not_a_3() {
-        let mut handshake = Handshake::new(PeerType::Server);
+        let mut handshake = Handshake::new(PeerType::_Server);
         let input = [4_u8];
 
         match handshake.process_bytes(&input) {
@@ -496,7 +496,7 @@ mod tests {
 
     #[test]
     fn can_accept_jw_player_example_p0_and_p1() {
-        let mut handshake = Handshake::new(PeerType::Server);
+        let mut handshake = Handshake::new(PeerType::_Server);
         let s0_and_s1 = match handshake.generate_outbound_p0_and_p1() {
             Err(x) => panic!("Unexpected error: {:?}", x),
             Ok(x) => x,
@@ -544,7 +544,7 @@ mod tests {
         c0_and_c1[0] = 3;
         fill_with_random_data(&mut c0_and_c1[9..RTMP_PACKET_SIZE + 1]);
 
-        let mut handshake = Handshake::new(PeerType::Server);
+        let mut handshake = Handshake::new(PeerType::_Server);
         let s0_and_s1 = match handshake.generate_outbound_p0_and_p1() {
             Err(x) => panic!("Unexpected error: {:?}", x),
             Ok(x) => x,
@@ -578,7 +578,7 @@ mod tests {
         // without reimplementing the exact algorithims for the test.
 
         let mut client = Handshake::new(PeerType::Client);
-        let mut server = Handshake::new(PeerType::Server);
+        let mut server = Handshake::new(PeerType::_Server);
 
         let c0_and_c1 = match client.generate_outbound_p0_and_p1() {
             Ok(bytes) => bytes,
@@ -617,7 +617,7 @@ mod tests {
 
     #[test]
     fn sends_outbound_p0_p1_if_p0_received_and_outbound_p0_and_p1_not_yet_sent() {
-        let mut handshake = Handshake::new(PeerType::Server);
+        let mut handshake = Handshake::new(PeerType::_Server);
         let input = [3_u8];
 
         let response = match handshake.process_bytes(&input) {
