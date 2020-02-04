@@ -37,7 +37,7 @@ pub enum Value {
   Boolean(bool),
   Utf8(String),
   Object(HashMap<String, Value>),
-  // Null,
+  Null,
   // Undefined,
 }
 impl Value {
@@ -199,6 +199,10 @@ impl Value {
         let hash = Value::read_object(&mut reader).await.expect("read Amf0 Object"); 
         Value::Object(hash)
       },
+      Some(Null) => {
+        trace!(target: "amf::Value::read", "Null");
+        Value::Null
+      },
       Some(EcmaArray) => {
         trace!(target: "amf::Value::read", "EcmaArray, skip 4 bytes then read object (!)");
         let fake_len = reader.read_u32().await.expect("ecma array length -- unused?");
@@ -220,6 +224,14 @@ mod tests {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
     use crate::util::bytes_from_hex_string;
+
+    #[tokio::test]
+    async fn can_read_null() {
+      let bytes = bytes_from_hex_string("05");
+      let buf: &[u8] = &bytes;
+      let value = Value::read(buf).await.expect("read");
+      assert_eq!(value, Value::Null)
+    }
 
     #[tokio::test]
     async fn can_read_string() {
