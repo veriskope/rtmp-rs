@@ -87,36 +87,50 @@ mod tests {
 
   #[tokio::test]
   async fn can_read_command_message() {
+    // this is really an integration test (ideally would be at a higher level)
     // std::env::set_var("RUST_LOG", "trace");
     // std::env::set_var("RUST_LOG", "info");
     pretty_env_logger::init();
-     // 02 00 07 5f 72 65 73 75  6c 74  Utf8("_result")
-     // 00 3f f0 00 00 00 00 00 00      Number(1.0)
+    // 02 00 07 5f 72 65 73 75  6c 74  Utf8("_result")
+    // 00 3f f0 00 00 00 00 00 00      Number(1.0)
+    //
     //  Object({"mode": Number(1.0), 
     //          "capabilities": Number(255.0), 
-    //          "fmsVer": Utf8String("FMS/5,0,15,5004")}),
+    //          "fmsVer": Utf8String("FMS/5,0,15,5004")})
+    //
+     // 03                              Object marker
+     //    00 06 66 6d  73 56 65 72                                 label: "fmsVer"
+     //    02 00 0f 46 4d 53 2f 35 2c 30 2c 31  35 2c 35 30 30 34   value: Utf8(""FMS/5,0,15,5004"")
+     //    00 0c 63 61 70 61 62 69 6c 69 74 69 65 73                label: "capabilities"
+     //    00 40 6f e0 00 00 00 00 00                               value: Number(255.0)
+     //    00 04 6d 6f 64 65                                        label: "mode"
+     //    00 3f f0 00 00 00 00 00 00                               value: Number(1.0)
+     //    00 00 09                     ObjectEnd
+     //    02 00 01 58                  Utf8("X")
     //  Object({"level": Utf8String("status"),
     //           "code": Utf8String("NetConnection.Connect.Success"),
     //           "description": Utf8String("Connection succeeded."),
-    //  64 61 74 61  "data"
-    //           "data": Object({"version": Utf8String("5,0,15,5004")}),
-    //           "objectEncoding": Number(0.0)})]
 
      info!("----- info log");
      println!("------println log");
      let bytes = bytes_from_hex_string(
      "02 00 07 5f 72 65 73 75  6c 74
       00 3f f0 00 00 00 00 00 00
-      03 00 06 66 6d  73 56 65 72 02 00 0f 46
-      4d 53 2f 35 2c 30 2c 31  35 2c 35 30 30 34 00 0c
-      63 61 70 61 62 69 6c 69  74 69 65 73 00 40 6f e0
-      00 00 00 00 00 00 04 6d  6f 64 65 
+      03 
+      00 06 66 6d 73 56 65 72 
+      02 00 0f 46 4d 53 2f 35 2c 30 2c 31  35 2c 35 30 30 34 
+      00 0c 63 61 70 61 62 69 6c 69  74 69 65 73 
+      00 40 6f e0 00 00 00 00 00 
+      00 04 6d 6f 64 65 
       00 3f f0 00 00 00 00 00 00 
       00 00 
       09 
       02 00 01 58");
 
 
+    //  64 61 74 61  "data"
+    //           "data": Object({"version": Utf8String("5,0,15,5004")}),
+    //           "objectEncoding": Number(0.0)})]
       // 03 00 05 6c 65 76 65 6c 02
       // 00 06 73 74 61 74 75 73  00 04 63 6f 64 65 02 00
       // 1d 4e 65 74 43 6f 6e 6e  65 63 74 69 6f 6e 2e 43

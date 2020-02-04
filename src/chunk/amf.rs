@@ -267,5 +267,40 @@ mod tests {
                         _  => panic!("expected Boolean, got {:?}", value)
       }  
     }
+    #[tokio::test]
+    async fn can_read_object_simple() {
+     // 03                              Object marker
+     //    00 06 66 6d  73 56 65 72                                 label: "fmsVer"
+     //    02 00 0f 46 4d 53 2f 35 2c 30 2c 31  35 2c 35 30 30 34   value: Utf8(""FMS/5,0,15,5004"")
+     //    00 0c 63 61 70 61 62 69 6c 69 74 69 65 73                label: "capabilities"
+     //    00 40 6f e0 00 00 00 00 00                               value: Number(255.0)
+     //    00 04 6d 6f 64 65                                        label: "mode"
+     //    00 3f f0 00 00 00 00 00 00                               value: Number(1.0)
+     //    00 00 09                     ObjectEnd
+
+      let bytes = bytes_from_hex_string("
+                  03 
+                  00 06 66 6d 73 56 65 72 
+                  02 00 0f 46 4d 53 2f 35 2c 30 2c 31  35 2c 35 30 30 34 
+                  00 0c 63 61 70 61 62 69 6c 69  74 69 65 73 
+                  00 40 6f e0 00 00 00 00 00 
+                  00 04 6d 6f 64 65 
+                  00 3f f0 00 00 00 00 00 00 
+                  00 00 
+                  09");
+
+      let buf: &[u8] = &bytes;
+      let value = Value::read(buf).await.expect("read");
+
+      let mut expected = HashMap::new();
+      expected.insert("fmsVer".to_string(), Value::Utf8("FMS/5,0,15,5004".to_string()));
+      expected.insert("capabilities".to_string(), Value::Number(255.0));
+      expected.insert("mode".to_string(), Value::Number(1.0));
+
+      match value {
+        Value::Object(h) => assert_eq!(h, expected),
+                      _  => panic!("expected Object, got {:?}", value)
+      }  
+    }
 
 } // mod tests
