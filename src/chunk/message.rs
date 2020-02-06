@@ -8,8 +8,7 @@ use super::amf::Value;
 pub enum Message {
   //Placeholder,
   // TODO: is highest f64 integer < u32?
-  CommandCall { name: String, id: u32, data: Value, opt: Value },
-  // CommandResponse { name: String, id: u32, info: Value, optional: Value },
+  Command { name: String, id: u32, data: Value, opt: Value },
 }
 
 //   AudioMessage         = 08,
@@ -29,18 +28,10 @@ impl Message {
     info!(target: "message", "read chunk_type {:?}, chunk_len {:?}", chunk_type, chunk_len);
 
     // TODO: consider reading whole chunk?  or at least checking to see if we read correct amount?
-    // let mut bytes = Vec::with_capacity(chunk_len as usize);
-    // let num_bytes = reader.take(chunk_len as u64).read_to_end(&mut bytes)
-    //     .await.expect("read chunk");
-    // if num_bytes != (chunk_len as usize) {
-    //   panic!("expected length to be {}, got {}", chunk_len, num_bytes);
-    // }
-    // let mut slice: &[u8] = &bytes;
-    // let mut buf: &mut std::io::Read = &mut slice;
 
     match chunk_type {
         20 => {     // Command message AMF0
-          let cmd_value = Value::read(&mut reader).await.expect("read transaction id");
+          let cmd_value = Value::read(&mut reader).await.expect("read command name");
           info!("cmd_value = {:?}", cmd_value);
 
           let transaction_id_value = Value::read(&mut reader).await.expect("read transaction id");
@@ -54,12 +45,11 @@ impl Message {
           // = help: add `#![feature(let_chains)]` to the crate attributes to enable
           //if let Value::Utf8(cmd_value) = name && if let Value::Number(transaction_id_value) = transaction_id {
 
-
           if let Value::Utf8(name) = cmd_value  {
             if let Value::Number(float_id) = transaction_id_value {
               // todo: why did `as` work but not into()
               let id: u32 = float_id as u32;
-              return Ok(Message::CommandCall{ name, id, data, opt})
+              return Ok(Message::Command{ name, id, data, opt})
             } else {
               panic!("unexpected value for transaction_id {:?}", transaction_id_value)
 
@@ -165,7 +155,7 @@ mod tests {
       // opt_hash.insert("code".to_string(), Value::Utf8("NetConnection.Connect.Success".to_string()));
       // opt_hash.insert("level".to_string(), Value::Utf8("status".to_string()));
 
-        assert_eq!(m, Message::CommandCall{
+        assert_eq!(m, Message::Command{
                       name: "_result".to_string(),
                       id: 1,
                       data: Value::Object(data_hash),
