@@ -31,7 +31,7 @@ pub use self::errors::{HandshakeError, HandshakeErrorKind};
 
 use byteorder::{BigEndian, ReadBytesExt};
 use hmac::{Hmac, Mac};
-use log::{info};
+use log::{info, trace};
 use rand;
 use rand::Rng;
 use sha2::Sha256;
@@ -233,7 +233,7 @@ impl Handshake {
     }
 
     fn parse_p0(&mut self) -> Result<HandshakeProcessResult, HandshakeError> {
-        info!(target: "handshake", "parse_p0");
+        trace!(target: "handshake", "parse_p0");
         if self.input_buffer.len() == 0 {
             return Ok(HandshakeProcessResult::InProgress {response_bytes: Vec::new()});
         }
@@ -248,7 +248,7 @@ impl Handshake {
     }
 
     fn parse_p1(&mut self) -> Result<HandshakeProcessResult, HandshakeError> {
-        info!(target: "handshake", "parse_p1");
+        trace!(target: "handshake", "parse_p1");
         if self.input_buffer.len() < RTMP_PACKET_SIZE {
             return Ok(HandshakeProcessResult::InProgress {response_bytes: Vec::new()});
         }
@@ -315,12 +315,12 @@ impl Handshake {
         }
 
         self.current_stage = Stage::WaitingForPacket2;
-        info!(target: "handshake", "current_stage = Stage::WaitingForPacket2");
+        trace!(target: "handshake", "current_stage = Stage::WaitingForPacket2");
         Ok(HandshakeProcessResult::InProgress {response_bytes: output_packet.to_vec()})
     }
 
     fn parse_p2(&mut self) -> Result<HandshakeProcessResult, HandshakeError> {
-        info!(target: "handshake", "parse_p2");
+        trace!(target: "handshake", "parse_p2");
         if self.input_buffer.len() < RTMP_PACKET_SIZE {
             return Ok(HandshakeProcessResult::InProgress {response_bytes: Vec::new()});
         }

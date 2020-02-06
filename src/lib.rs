@@ -11,34 +11,30 @@ use chunk::{Chunk, Signal};
 mod handshake;
 use handshake::{HandshakeProcessResult, Handshake, PeerType};
 
-use log::{info, warn};
+use log::{info, trace, warn};
 use rml_amf0::{Amf0Value};
 use std::collections::HashMap;
 
 pub mod util {
-use log::{info};
+use log::{trace};
 
 //fn bytes_from_hex_string(hex_str: &str) -> &[u8] {
 pub fn bytes_from_hex_string(hex_str: &str) -> Vec<u8> {
-  // info!(target: "util::bytes_from_hex_string", "hex_str: {}", hex_str);
-  println!("hex_str: {}", hex_str);
+  trace!(target: "util::bytes_from_hex_string", "hex_str: {}", hex_str);
   let result = hex_str.split_whitespace()
                   .map(|hex_digit| u8::from_str_radix(hex_digit, 16))
                   .collect::<Result<Vec<u8>, _>>();
   match result {
     Ok(bytes) => {
-      info!(target: "util", "{:02X?}", bytes);
-      println!("bytes: {:?}", bytes);
+      trace!(target: "util", "{:02X?}", bytes);
       return bytes
     },
     Err(e) => panic!("error {} parsing: {}", e, hex_str),
   }
-  // b"0x01"
 }
 
 #[cfg(test)]
 mod tests {
-    // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
 
     #[test]
@@ -86,7 +82,7 @@ impl<Transport: AsyncRead + AsyncWrite + Unpin> Connection<Transport> {
 
     // async fn send_connect_command(&mut self) -> Result<(), Box<dyn std::error::Error>> {
     async fn send_connect_command(&mut self) -> io::Result<()> {
-        info!(target: "rtmp::Connection", "send_connect_command");
+        trace!(target: "rtmp::Connection", "send_connect_command");
         let mut properties = HashMap::new();
 
         let command_name = "connect".to_string();
@@ -110,9 +106,9 @@ impl<Transport: AsyncRead + AsyncWrite + Unpin> Connection<Transport> {
         ];
 
         let bytes = rml_amf0::serialize(&values).expect("serialize command argument");
-        println!("{:02x?}", bytes);
+        trace!(target: "rtmp::Connection","{:02x?}", bytes);
         let message_length = bytes.len();
-        println!("length: {}", message_length);
+        trace!(target: "rtmp::Connection", "length: {}", message_length);
 
 
         // hardcode chunkstream message header
@@ -130,8 +126,8 @@ impl<Transport: AsyncRead + AsyncWrite + Unpin> Connection<Transport> {
           // write chunk
 
           let (chunk, num_bytes) = Chunk::read(&mut self.cn).await?;
-          info!(target: "rtmp::Connection", "{:?}", chunk);
-          info!(target: "rtmp::Connection", "parsed {} bytes", num_bytes);
+          trace!(target: "rtmp::Connection", "{:?}", chunk);
+          trace!(target: "rtmp::Connection", "parsed {} bytes", num_bytes);
           match chunk {
             Chunk::Control(Signal::SetWindowAckSize(size)) => {
               self.window_ack_size = size;
@@ -160,7 +156,7 @@ impl<Transport: AsyncRead + AsyncWrite + Unpin> Connection<Transport> {
             if num_bytes == 0 {
                 panic!("connection unexpectedly closed");   // TODO: return real error?
             }
-            println!("bytes read: {}", num_bytes);
+            trace!(target: "rtmp::connect", "bytes read: {}", num_bytes);
                 let (is_finished, response_bytes) = match handshake.process_bytes(&read_buffer) {
                 Err(x) => panic!("Error returned: {:?}", x),
                 Ok(HandshakeProcessResult::InProgress {response_bytes: bytes}) => (false, bytes),

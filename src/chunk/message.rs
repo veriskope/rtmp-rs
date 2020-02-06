@@ -1,6 +1,6 @@
 use tokio::prelude::*;
 extern crate proc_macro;
-use log::info;
+use log::{info, trace};
 use super::amf::Value;
 
 // TODO: can we just derive Read on these, given that we know type?
@@ -25,21 +25,21 @@ impl Message {
   pub async fn read<T>(mut reader: T, chunk_type: u8, chunk_len: u32) -> io::Result<Message>
   where T: AsyncRead + Unpin
   {
-    info!(target: "message", "read chunk_type {:?}, chunk_len {:?}", chunk_type, chunk_len);
+    info!(target: "message::read", "read chunk_type {:?}, chunk_len {:?}", chunk_type, chunk_len);
 
     // TODO: consider reading whole chunk?  or at least checking to see if we read correct amount?
 
     match chunk_type {
         20 => {     // Command message AMF0
           let cmd_value = Value::read(&mut reader).await.expect("read command name");
-          info!("cmd_value = {:?}", cmd_value);
+          trace!(target: "message::read", "cmd_value = {:?}", cmd_value);
 
           let transaction_id_value = Value::read(&mut reader).await.expect("read transaction id");
-          info!("transaction_id_value = {:?}", transaction_id_value);
+          trace!(target: "message::read", "transaction_id_value = {:?}", transaction_id_value);
           let data = Value::read(&mut reader).await.expect("read command data");
-          info!("command data = {:?}", data);
+          trace!(target: "message::read", "command data = {:?}", data);
           let opt = Value::read(&mut reader).await.expect("read optional data");
-          info!("optional data = {:?}", opt);
+          trace!(target: "message::read", "optional data = {:?}", opt);
 
           // = note: for more information, see https://github.com/rust-lang/rust/issues/53667
           // = help: add `#![feature(let_chains)]` to the crate attributes to enable
@@ -47,19 +47,16 @@ impl Message {
 
           if let Value::Utf8(name) = cmd_value  {
             if let Value::Number(float_id) = transaction_id_value {
-              // todo: why did `as` work but not into()
               let id: u32 = float_id as u32;
-              return Ok(Message::Command{ name, id, data, opt})
+              let cmd = Message::Command{ name, id, data, opt};
+              info!(target: "message::read", "cmd: {:?}", cmd);
+              return Ok(cmd)
             } else {
               panic!("unexpected value for transaction_id {:?}", transaction_id_value)
-
             }
-
           } else {
             panic!("unexpected value for cmd {:?} ", cmd_value)
           }
-          // Ok(Message::Placeholder)
-
         },
         _ => {
           panic!("unimplemented read for message chunk type {}", chunk_type)
@@ -101,8 +98,6 @@ mod tests {
     //           "code": Utf8String("NetConnection.Connect.Success"),
     //           "description": Utf8String("Connection succeeded."),
 
-     info!("----- info log");
-     println!("------println log");
      let bytes = bytes_from_hex_string(
      "02 00 07 5f 72 65 73 75  6c 74
       00 3f f0 00 00 00 00 00 00
