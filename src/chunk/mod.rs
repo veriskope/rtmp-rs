@@ -81,13 +81,58 @@ impl Chunk {
     };
     Ok((chunk, header_size + length))
   }
-}
 
+  pub async fn write<T>(mut writer: T, chunk: Chunk) -> io::Result<u32>
+  where T: AsyncWrite + Unpin
+  {
+    panic!("unimplemented!")
+  }
+
+} // impl Chunk
 
 #[cfg(test)]
 mod tests {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
+    use amf::Value;
+    use std::collections::HashMap;
+
+  #[tokio::test]
+  async fn can_write_connect_message() {
+    // use crate::util::bytes_from_hex_string;
+    // let cs_id: u8 = 3;
+    //         let hex_str = format!("{:02x} 00 00 00 00 00 {:02x} 14  00 00 00 00", cs_id, message_length);
+
+    // 03 00 00 00 00 00 6c 14  00 00 00 00
+    // 02 00 07 63 6f 6e 6e 65 63 74 00 3f f0 00 00 00 00 00 00 03 00 03 61 70 70 02 00 09 76 6f 64 2f 6d 65 64 69 61 00 08 66 6c 61 73 68 56 65 72 02 00 0e 4d 41 43 20 31 30 2c 30 2c 33 32 2c 31 38 00 05 74 63 55 72 6c 02 00 1f 72 74 6d 70 3a 2f 2f 31 32 37 2e 30 2e 30 2e 31 3a 31 39 33 35 2f 76 6f 64 2f 6d 65 64 69 61 00 00 09");
+    // let chunk_header = bytes_from_hex_string(&hex_str);
+
+    let mut properties = HashMap::new();
+
+    let app = "vod/media".to_string();
+    properties.insert("app".to_string(), Value::Utf8(app));
+
+    let flash_version = "MAC 10,0,32,18".to_string();   // TODO: must we, really?
+    properties.insert("flashVer".to_string(), Value::Utf8(flash_version));
+
+    properties.insert("objectEncoding".to_string(), Value::Number(0.0));
+    
+    let url = "rtmp://example.com/something".to_string();
+    properties.insert("tcUrl".to_string(), Value::Utf8(url));
+
+    let cmd = Message::Command { 
+              name: "connect".to_string(), 
+              id: 1, 
+              data: Value::Object(properties),     // shouldn't this be an array?
+              opt: Value::Null };
+
+    let mut buf = Vec::new();
+        
+    let num_bytes = Chunk::write(buf, Chunk::Msg(cmd)).await.expect("write");
+    // test will fail if expect is triggered
+    // assert_eq!(num_bytes, expected_bytes);
+
+}
 
 #[tokio::test]
 async fn can_read_chunk_set_window_ack_size() {
@@ -105,7 +150,7 @@ async fn can_read_chunk_set_window_ack_size() {
 #[tokio::test]
 async fn can_read_chunk_set_peer_bandwidth() {
   use crate::util::bytes_from_hex_string;
- let bytes = bytes_from_hex_string("02 00 00 00 00 00 05 06 00 00 00 00 00 26 25 a0 02");
+  let bytes = bytes_from_hex_string("02 00 00 00 00 00 05 06 00 00 00 00 00 26 25 a0 02");
 
   let buf: &[u8] = &bytes;
   let (chunk, num_bytes) = Chunk::read(buf).await.expect("read");
