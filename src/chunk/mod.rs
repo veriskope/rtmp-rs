@@ -2,6 +2,8 @@ use log::{info, warn};
 use tokio::prelude::*;
 pub mod amf;
 
+use rml_amf0::{Amf0Value};
+
 
 mod signal;                         // declare module
 pub use signal::Signal as Signal;   // export Signal as part of this module
@@ -82,11 +84,41 @@ impl Chunk {
     Ok((chunk, header_size + length))
   }
 
+
   pub async fn write<T>(mut writer: T, chunk: Chunk) -> io::Result<u32>
   where T: AsyncWrite + Unpin
-  {
-    panic!("unimplemented!")
-  }
+  {    
+    let _bytes_written = 0;
+    match chunk {
+      Chunk::Msg(message) => {
+        // match message {
+        //   Message::Command {name, id, data, opt }=> {   // refactor to message.rs
+        //     let values = vec![
+        //       Amf0Value::Utf8String(name),
+        //       Amf0Value::Number(id as f64),
+        //       data       
+        //   ];
+  
+        //   let bytes = rml_amf0::serialize(&values).expect("serialize command argument");
+        //   trace!(target: "rtmp::Connection","{:02x?}", bytes);
+        //   let message_length = bytes.len();
+        //   trace!(target: "rtmp::Connection", "length: {}", message_length);
+  
+  
+        //   // hardcode chunkstream message header
+        //   let cs_id: u8 = 3;
+        //   let hex_str = format!("{:02x} 00 00 00 00 00 {:02x} 14  00 00 00 00", cs_id, message_length);
+        //   let chunk_header = util::bytes_from_hex_string(&hex_str);
+        //   self.write(&chunk_header).await;
+        panic!("unimplemented!")
+
+      },
+      Chunk::Control(s) => {
+        panic!("unimplemented!")
+      }
+    }; // match chunk
+    // Ok(bytes_written)
+  } // fn write
 
 } // impl Chunk
 
@@ -128,7 +160,7 @@ mod tests {
 
     let mut buf = Vec::new();
         
-    let num_bytes = Chunk::write(buf, Chunk::Msg(cmd)).await.expect("write");
+    let _num_bytes = Chunk::write(buf, Chunk::Msg(cmd)).await.expect("write");
     // test will fail if expect is triggered
     // assert_eq!(num_bytes, expected_bytes);
 
