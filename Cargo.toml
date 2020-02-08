@@ -11,6 +11,9 @@ tokio = { version = "0.2", features = ["full"] }
 log = "0.4"
 pretty_env_logger = "0.3"
 
+tokio-tls = "0.3"  # TODO: make this optional?
+
+
 byteorder = "1.2.1"   # TODO: removing? we may have all we need built-in now
 rand = "0.3"
 failure = "0.1.1"
@@ -21,3 +24,4 @@ serde = "1.0.104"
 syn = "1.0.14"
 enum-primitive-derive = "0.1.2"
 num-traits = "0.2.11"
+native-tls = "0.2.3"
