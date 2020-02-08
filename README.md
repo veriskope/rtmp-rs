@@ -1,23 +1,28 @@
+## rtmp-rs
+
+requires Rust 1.40 or higher ([f64:from_be_bytes](https://doc.rust-lang.org/beta/std/primitive.f64.html#method.from_be_bytes)) -- if you are using typical install,
+check local rust installation with `rustup show`
+
+
 ## Running the example
 
-requires unstable
 ```
-cargo +nightly build
+cargo build
 ```
 
 with logging...
 ```
-RUST_LOG=info  cargo +nightly run --example connect
+RUST_LOG=info  cargo run --example connect
 ```
 
 with crazy amount of logging...
 ```
-RUST_LOG=trace  cargo +nightly run --example connect
+RUST_LOG=trace  cargo run --example connect
 ```
 
 run specific test with logging (see note below about enabling from code):
 ```
-RUST_LOG=trace cargo +nightly test can_read_command_message
+RUST_LOG=trace cargo test can_read_command_message
 ```
 
 ## Work in progress
@@ -42,7 +47,7 @@ async fn main() {
 
 ## TODO
 
-- how to run some code before test run?  (currently need to add     `pretty_env_logger::init();` in the code of the test)
+- how to run some code before test run?  (for logging, I currently add `pretty_env_logger::init();` in the code of the test)
 - I've gotten a bit fast-and-loose with adding crates, would like to consider
   reducing dependencies once the basics are working
 - maybe use procedural macro to implement reading/writing of chunks with less 
