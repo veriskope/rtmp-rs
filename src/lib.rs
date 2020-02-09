@@ -104,6 +104,8 @@ impl<Transport: AsyncRead + AsyncWrite + Unpin> Connection<Transport> {
             Amf0Value::Number(transaction_id),
             arguments       // connect has one param, should allow array
         ];
+        // TODO
+        Chunk::write(&mut self.cn, Chunk::Placeholder).await.expect("chunk write");
 
         let bytes = rml_amf0::serialize(&values).expect("serialize command argument");
         trace!(target: "rtmp::Connection","{:02x?}", bytes);

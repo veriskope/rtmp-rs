@@ -1,8 +1,10 @@
 use log::{info, warn};
 use tokio::prelude::*;
 pub mod amf;
+use amf::Value;
+use amf::Value::*;
 
-use rml_amf0::{Amf0Value};
+// use rml_amf0::{Amf0Value};
 
 
 mod signal;                         // declare module
@@ -44,6 +46,7 @@ pub use message::Message as Message;
 
 #[derive(Debug, PartialEq)]
 pub enum Chunk {
+  Placeholder,
   Control(Signal),
   Msg(Message)
 }
@@ -88,17 +91,18 @@ impl Chunk {
   pub async fn write<T>(mut writer: T, chunk: Chunk) -> io::Result<u32>
   where T: AsyncWrite + Unpin
   {    
-    let _bytes_written = 0;
+    let _bytes_written:u32 = 0;
     match chunk {
       Chunk::Msg(message) => {
-        // match message {
-        //   Message::Command {name, id, data, opt }=> {   // refactor to message.rs
-        //     let values = vec![
-        //       Amf0Value::Utf8String(name),
-        //       Amf0Value::Number(id as f64),
-        //       data       
-        //   ];
-  
+        match message {
+          Message::Command {name, id: _, data:_, opt:_ }=> {   // refactor to message.rs
+            // TODO: this isn't correct
+            Value::write(&mut writer, Utf8(name)).await.expect("write AMF command name");
+          //     Amf0Value::Utf8(name),
+          //     Amf0Value::Number(id as f64),
+          //     data       
+          // ];
+          }, 
         //   let bytes = rml_amf0::serialize(&values).expect("serialize command argument");
         //   trace!(target: "rtmp::Connection","{:02x?}", bytes);
         //   let message_length = bytes.len();
@@ -110,14 +114,18 @@ impl Chunk {
         //   let hex_str = format!("{:02x} 00 00 00 00 00 {:02x} 14  00 00 00 00", cs_id, message_length);
         //   let chunk_header = util::bytes_from_hex_string(&hex_str);
         //   self.write(&chunk_header).await;
+        // _ => panic!("unimplemented!")
+      };
+      ()
+    },
+      Chunk::Control(_s) => {
         panic!("unimplemented!")
-
       },
-      Chunk::Control(s) => {
+      _ => {
         panic!("unimplemented!")
       }
     }; // match chunk
-    // Ok(bytes_written)
+    Ok(_bytes_written)
   } // fn write
 
 } // impl Chunk
@@ -160,7 +168,7 @@ mod tests {
 
     let mut buf = Vec::new();
         
-    let _num_bytes = Chunk::write(buf, Chunk::Msg(cmd)).await.expect("write");
+    let _num_bytes = Chunk::write(&mut buf, Chunk::Msg(cmd)).await.expect("write");
     // test will fail if expect is triggered
     // assert_eq!(num_bytes, expected_bytes);
 

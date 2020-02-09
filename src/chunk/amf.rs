@@ -281,6 +281,15 @@ mod tests {
       assert_eq!(value, Value::Null)
     }
 
+    #[tokio::test]
+    async fn can_write_null() {
+      let expected = bytes_from_hex_string("05");
+      let mut buf = Vec::new();
+      Value::write(&mut buf, Value::Null).await.expect("write");
+      assert_eq!(buf, expected);
+    }
+
+
     // 02                       String type marker
     // 00 07                    7 bytes long
     // 63 6f 6e 6e 65 63 74     "connect"
