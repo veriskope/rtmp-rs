@@ -218,24 +218,56 @@ impl Value {
     Ok(value)
   } // pub async fn read
 
-  pub async fn write_string<T>(mut writer: T, 
-    s: String) -> io::Result<()>
+  pub async fn write_string<T>(mut writer: T,
+    s: String, write_marker: bool) -> io::Result<()>
     where T: AsyncWrite + Unpin
   {
+    if write_marker {
+      writer.write_u8(Utf8String as u8).await.expect("write String marker");
+    }
     writer.write_u16(s.len() as u16).await.expect("write string length");
     writer.write_all(s.as_bytes()).await.expect("write_all string");
     Ok(())
   }
 
-  async fn write_object<T>(mut writer: T, 
-                              hash: HashMap<String, Value>) -> io::Result<()>
+  pub async fn write_number<T>(mut writer: T,
+    num: f64, write_marker: bool) -> io::Result<()>
+    where T: AsyncWrite + Unpin
+  {
+    if write_marker {
+      writer.write_u8(Number as u8).await.expect("write Number marker");
+    }
+    writer.write_all(&f64::to_be_bytes(num)).await.expect("write_all Number");
+    Ok(())
+  }
+
+  async fn write_object<T>(mut writer: T,
+                          hash: HashMap<String, Value>,
+                          write_marker: bool) -> io::Result<()>
   where T: AsyncWrite + Unpin
   {
-    for (label, value) in &hash {
-      // TODO: can this be a long string?
-      Value::write_string(&mut writer, label.clone()).await.expect("write obj label"); // TODO: should not need to clone
-      // TODO write_value();
+    if write_marker {
+      writer.write_u8(Object as u8).await.expect("write Object marker");
     }
+    let mut keys = Vec::new();
+    for k in hash.keys() { keys.push(k) };
+    keys.sort();
+
+    for key in keys {
+      // TODO: can this be a long string?
+      Value::write_string(&mut writer, key.clone(), false).await.expect("write obj label"); // TODO: should not need to clone
+
+      if let Some(value) = hash.get(key) {
+        // TODO: cloning seems wrong here
+        match value {
+          Value::Utf8(s) => Value::write_string(&mut writer, s.clone(), true).await.expect("write string"),
+          Value::Number(n) => Value::write_number(&mut writer, n.clone(), true).await.expect("write number"),
+          _ => panic!("unimplemented nested value {:?}", value),
+        }
+      }
+    }
+    Value::write_string(&mut writer, "".to_string(), false).await.expect("write empty string to mark Object end");
+    writer.write_u8(ObjectEnd as u8).await.expect("write ObjectEnd marker");
     Ok(())
   }
 
@@ -247,15 +279,12 @@ impl Value {
     match value {
       Value::Utf8(s) => {
         trace!(target: "amf::Value::write", "Utf8({:?})", s);
-        writer.write_u8(Utf8String as u8).await.expect("write Utf8String marker");
         // TODO check for long string
-        writer.write_u16(s.len() as u16).await.expect("write string length");
-        writer.write_all(s.as_bytes()).await.expect("write_all string");
+        Value::write_string(writer, s, true).await.expect("write string");
       },
       Value::Number(n) => {
         trace!(target: "amf::Value::write", "Number: {:?}", n);
-         writer.write_u8(Number as u8).await.expect("write Number marker");
-         writer.write_all(&f64::to_be_bytes(n)).await.expect("write_all Number");
+        Value::write_number(writer, n, true).await.expect("write number");
       },
       Value::Boolean(b) => {
         trace!(target: "amf::Value::write", "Boolean: {:?}", b);
@@ -264,8 +293,7 @@ impl Value {
      },
       Value::Object(o) => {
         trace!(target: "amf::Value::write", "Object: {:?}", o);
-        writer.write_u8(Object as u8).await.expect("write Object marker");
-        Value::write_object(&mut writer, o).await.expect("read Amf0 Object");
+        Value::write_object(&mut writer, o, true).await.expect("read Amf0 Object");
       },
       Value::Null => {
         trace!(target: "amf::Value::write", "Null");
@@ -410,8 +438,8 @@ mod tests {
       let value = Value::read(buf).await.expect("read");
 
       let mut expected = HashMap::new();
-      expected.insert("fmsVer".to_string(), Value::Utf8("FMS/5,0,15,5004".to_string()));
       expected.insert("capabilities".to_string(), Value::Number(255.0));
+      expected.insert("fmsVer".to_string(), Value::Utf8("FMS/5,0,15,5004".to_string()));
       expected.insert("mode".to_string(), Value::Number(1.0));
 
       match value {
@@ -422,22 +450,31 @@ mod tests {
 
     #[tokio::test]
     async fn can_write_object_simple() {
+    // 03                              Object marker
+     //    00 0c 63 61 70 61 62 69 6c 69 74 69 65 73                label: "capabilities"
+     //    00 40 6f e0 00 00 00 00 00                               value: Number(255.0)
+     //    00 06 66 6d  73 56 65 72                                 label: "fmsVer"
+     //    02 00 0f 46 4d 53 2f 35 2c 30 2c 31  35 2c 35 30 30 34   value: Utf8(""FMS/5,0,15,5004"")
+     //    00 04 6d 6f 64 65                                        label: "mode"
+     //    00 3f f0 00 00 00 00 00 00                               value: Number(1.0)
+     //    00 00 09                     ObjectEnd
+
       let expected =  bytes_from_hex_string("
                       03
-                      00 06 66 6d 73 56 65 72
-                      02 00 0f 46 4d 53 2f 35 2c 30 2c 31  35 2c 35 30 30 34
                       00 0c 63 61 70 61 62 69 6c 69  74 69 65 73
                       00 40 6f e0 00 00 00 00 00
+                      00 06 66 6d 73 56 65 72
+                      02 00 0f 46 4d 53 2f 35 2c 30 2c 31  35 2c 35 30 30 34
                       00 04 6d 6f 64 65
                       00 3f f0 00 00 00 00 00 00
                       00 00
                       09");
 
       let mut h = HashMap::new();
-      h.insert("fmsVer".to_string(), Value::Utf8("FMS/5,0,15,5004".to_string()));
       h.insert("capabilities".to_string(), Value::Number(255.0));
+      h.insert("fmsVer".to_string(), Value::Utf8("FMS/5,0,15,5004".to_string()));
       h.insert("mode".to_string(), Value::Number(1.0));
-                
+
       let mut buf = Vec::new();
       Value::write(&mut buf, Value::Object(h)).await.expect("write");
       assert_eq!(buf, expected);
