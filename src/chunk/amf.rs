@@ -231,27 +231,27 @@ impl Value {
         writer.write_u16(s.len() as u16).await.expect("write string length");
         writer.write_all(s.as_bytes()).await.expect("write_all string");
       },
-      // Some(Number) => {
-      //   trace!(target: "amf::Value::read", "Number");
-      //   let n = Value::read_number(&mut reader).await.expect("read Amf0 Number");
-      //   Value::Number(n)
-      // },
-      // Some(Boolean) => {
-      //   trace!(target: "amf::Value::read", "Boolean");
+      Value::Number(n) => {
+        trace!(target: "amf::Value::write", "Number: {:?}", n);
+         writer.write_u8(Number as u8).await.expect("write Number marker");
+         writer.write_all(&f64::to_be_bytes(n)).await.expect("write_all Number");
+      },
+      // Value::Boolean => {
+      //   trace!(target: "amf::Value::write", "Boolean");
       //   let b = Value::read_bool(&mut reader).await.expect("read Amf0 Boolean");
       //   Value::Boolean(b)
       // },
-      // Some(Object) => {
-      //   trace!(target: "amf::Value::read", "Object");
+      // Value::Object => {
+      //   trace!(target: "amf::Value::write", "Object");
       //   let hash = Value::read_object(&mut reader).await.expect("read Amf0 Object");
       //   Value::Object(hash)
       // },
-      // Some(Null) => {
-      //   trace!(target: "amf::Value::read", "Null");
-      //   Value::Null
-      // },
-      // Some(EcmaArray) => {
-      //   trace!(target: "amf::Value::read", "EcmaArray, skip 4 bytes then read object (!)");
+      Value::Null => {
+        trace!(target: "amf::Value::write", "Null");
+        writer.write_u8(Null as u8).await.expect("write Null marker");
+      },
+      // Value::EcmaArray => {
+      //   trace!(target: "amf::Value::write", "EcmaArray, skip 4 bytes then read object (!)");
       //   let fake_len = reader.read_u32().await.expect("ecma array length -- unused?");
       //   trace!(target: "amf::Value::read", "ignoring u32 {:?}", fake_len);
       //   let hash = Value::read_object(&mut reader).await.expect("read Amf0 Object");
@@ -325,6 +325,14 @@ mod tests {
         Value::Number(val) => assert_eq!(val, num),
                         _  => panic!("expected Number, got {:?}", value)
       }
+    }
+
+    #[tokio::test]
+    async fn can_write_number_zero() {
+      let expected: [u8; 9] = [0x00; 9];
+      let mut buf = Vec::new();
+      Value::write(&mut buf, Value::Number(0.0)).await.expect("write");
+      assert_eq!(buf, expected);
     }
 
     #[tokio::test]
