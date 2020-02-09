@@ -218,6 +218,27 @@ impl Value {
     Ok(value)
   } // pub async fn read
 
+  pub async fn write_string<T>(mut writer: T, 
+    s: String) -> io::Result<()>
+    where T: AsyncWrite + Unpin
+  {
+    writer.write_u16(s.len() as u16).await.expect("write string length");
+    writer.write_all(s.as_bytes()).await.expect("write_all string");
+    Ok(())
+  }
+
+  async fn write_object<T>(mut writer: T, 
+                              hash: HashMap<String, Value>) -> io::Result<()>
+  where T: AsyncWrite + Unpin
+  {
+    for (label, value) in &hash {
+      // TODO: can this be a long string?
+      Value::write_string(&mut writer, label.clone()).await.expect("write obj label"); // TODO: should not need to clone
+      // TODO write_value();
+    }
+    Ok(())
+  }
+
   pub async fn write<T>(mut writer: T, value: Value) -> io::Result<()>
   where T: AsyncWrite + Unpin
   {
@@ -236,16 +257,16 @@ impl Value {
          writer.write_u8(Number as u8).await.expect("write Number marker");
          writer.write_all(&f64::to_be_bytes(n)).await.expect("write_all Number");
       },
-      // Value::Boolean => {
-      //   trace!(target: "amf::Value::write", "Boolean");
-      //   let b = Value::read_bool(&mut reader).await.expect("read Amf0 Boolean");
-      //   Value::Boolean(b)
-      // },
-      // Value::Object => {
-      //   trace!(target: "amf::Value::write", "Object");
-      //   let hash = Value::read_object(&mut reader).await.expect("read Amf0 Object");
-      //   Value::Object(hash)
-      // },
+      Value::Boolean(b) => {
+        trace!(target: "amf::Value::write", "Boolean: {:?}", b);
+        writer.write_u8(Boolean as u8).await.expect("write Boolean marker");
+        writer.write_u8(b as u8).await.expect("write_u8 Boolean");
+     },
+      Value::Object(o) => {
+        trace!(target: "amf::Value::write", "Object: {:?}", o);
+        writer.write_u8(Object as u8).await.expect("write Object marker");
+        Value::write_object(&mut writer, o).await.expect("read Amf0 Object");
+      },
       Value::Null => {
         trace!(target: "amf::Value::write", "Null");
         writer.write_u8(Null as u8).await.expect("write Null marker");
@@ -356,6 +377,14 @@ mod tests {
       }
     }
     #[tokio::test]
+    async fn can_write_bool_true() {
+      let expected = bytes_from_hex_string("01 01");
+      let mut buf = Vec::new();
+      Value::write(&mut buf, Value::Boolean(true)).await.expect("write");
+      assert_eq!(buf, expected);
+    }
+
+    #[tokio::test]
     async fn can_read_object_simple() {
      // 03                              Object marker
      //    00 06 66 6d  73 56 65 72                                 label: "fmsVer"
@@ -391,4 +420,26 @@ mod tests {
       }
     }
 
+    #[tokio::test]
+    async fn can_write_object_simple() {
+      let expected =  bytes_from_hex_string("
+                      03
+                      00 06 66 6d 73 56 65 72
+                      02 00 0f 46 4d 53 2f 35 2c 30 2c 31  35 2c 35 30 30 34
+                      00 0c 63 61 70 61 62 69 6c 69  74 69 65 73
+                      00 40 6f e0 00 00 00 00 00
+                      00 04 6d 6f 64 65
+                      00 3f f0 00 00 00 00 00 00
+                      00 00
+                      09");
+
+      let mut h = HashMap::new();
+      h.insert("fmsVer".to_string(), Value::Utf8("FMS/5,0,15,5004".to_string()));
+      h.insert("capabilities".to_string(), Value::Number(255.0));
+      h.insert("mode".to_string(), Value::Number(1.0));
+                
+      let mut buf = Vec::new();
+      Value::write(&mut buf, Value::Object(h)).await.expect("write");
+      assert_eq!(buf, expected);
+    }
 } // mod tests
