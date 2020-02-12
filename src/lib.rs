@@ -1,7 +1,7 @@
 // used om amf0.rs
 #[macro_use] extern crate enum_primitive_derive;
 
-
+use url::Url;
 use tokio::prelude::*;
 use tokio::{io::BufReader, net::TcpStream};
 pub mod error;
@@ -51,14 +51,14 @@ mod tests {
 
 
 pub struct Connection<T = TcpStream> {
-    url: String,
+    url: Url,
     cn: BufReader<T>,
     window_ack_size: u32,
 }
 
 impl<Transport: AsyncRead + AsyncWrite + Unpin> Connection<Transport> {
     // consider passing ConnectionOptions with transport? and (URL | parts)
-    pub fn new(url: String, transport: Transport) -> Self {
+    pub fn new(url: Url, transport: Transport) -> Self {
       info!(target: "rtmp::Connection", "new");
       Connection {
         url,
@@ -91,7 +91,7 @@ impl<Transport: AsyncRead + AsyncWrite + Unpin> Connection<Transport> {
         let flash_version = "MAC 10,0,32,18".to_string();   // TODO: must we, really?
         properties.insert("flashVer".to_string(), Amf0Value::Utf8String(flash_version));
         // properties.insert("objectEncoding".to_string(), Amf0Value::Number(0.0));
-        properties.insert("tcUrl".to_string(), Amf0Value::Utf8String(self.url.clone()));
+        properties.insert("tcUrl".to_string(), Amf0Value::Utf8String(self.url.to_string()));
 
         //let params = [Amf0Value::Object(properties)];
         // TODO: Amf0Value - should implement Copy, & API shouldn't need copy

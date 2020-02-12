@@ -1,6 +1,7 @@
 use native_tls::TlsConnector;
 use tokio::net::TcpStream;
 use tokio_tls;
+use url::Url;
 
 extern crate pretty_env_logger;
 
@@ -21,7 +22,8 @@ async fn main() {
   let cx = tokio_tls::TlsConnector::from(cx);
   let socket = cx.connect("live-api-s.facebook.com", tcp).await.expect("Tls connect");
 
-  let url = format!("rtmps://{}:443/rtmp/", addr);
+  let url = Url::parse(&format!("rtmps://{}:443/rtmp/", addr)).expect("url parse");
+
   let mut conn = rtmp::Connection::new(url, socket);
   // optional set timeout to 1 sec: conn.set_timeout(1000);  
   conn.connect().await.expect("rtmp connection failed");

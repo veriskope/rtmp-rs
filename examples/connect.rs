@@ -1,5 +1,7 @@
-use tokio::net::TcpStream;
 extern crate pretty_env_logger;
+
+use tokio::net::TcpStream;
+use url::{Url, ParseError};
 
 #[tokio::main]
 async fn main() {
@@ -13,7 +15,8 @@ async fn main() {
   let tcp = TcpStream::connect(addr).await.expect("tcp connection failed");
   tcp.set_nodelay(true).expect("set_nodelay call failed");
 
-  let url = format!("rtmp://{}/vod/media", addr);
+  let url = Url::parse(&format!("rtmp://{}/vod/media", addr)).expect("url parse");
+
   let mut conn = rtmp::Connection::new(url, tcp);
   // optional set timeout to 1 sec: conn.set_timeout(1000);  
   conn.connect().await.expect("rtmp connection failed");
