@@ -1,7 +1,7 @@
 extern crate pretty_env_logger;
 
 use tokio::net::TcpStream;
-use url::{Url, ParseError};
+use url::Url;
 
 #[tokio::main]
 async fn main() {

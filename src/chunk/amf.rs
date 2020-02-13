@@ -307,7 +307,7 @@ impl Value {
       //   Value::Object(hash)
       // },
 
-      _         => panic!("unexpected AMf0 type: {:?}", value)
+      // _         => panic!("unexpected AMf0 type: {:?}", value)
     }; // match Marker
     Ok(())
   } // pub async fn read
