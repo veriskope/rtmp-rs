@@ -9,6 +9,7 @@ pub enum Message {
   //Placeholder,
   // TODO: is highest f64 integer < u32?
   Command { name: String, id: u32, data: Value, opt: Value },
+  Response { id: u32, data: Value, opt: Value },
 }
 
 //   AudioMessage         = 08,
@@ -48,13 +49,17 @@ impl Message {
           // = note: for more information, see https://github.com/rust-lang/rust/issues/53667
           // = help: add `#![feature(let_chains)]` to the crate attributes to enable
           //if let Value::Utf8(cmd_value) = name && if let Value::Number(transaction_id_value) = transaction_id {
-
           if let Value::Utf8(name) = cmd_value  {
             if let Value::Number(float_id) = transaction_id_value {
               let id: u32 = float_id as u32;
-              let cmd = Message::Command{ name, id, data, opt};
-              info!(target: "message::read", "cmd: {:?}", cmd);
-              return Ok(cmd)
+
+              let msg = if name == "_result".to_string() {
+                Message::Response { id, data, opt }
+              } else {
+                Message::Command { name, id, data, opt }
+              };
+              info!(target: "message::read", "msg: {:?}", msg);
+              return Ok(msg)
             } else {
               panic!("unexpected value for transaction_id {:?}", transaction_id_value)
             }
@@ -79,9 +84,9 @@ impl Message {
         Value::write(&mut writer, data).await.expect("write AMF command data");
         Value::write(&mut writer, opt).await.expect("write AMF optional info");
       },
-      // _ => {
-      //   panic!("unimplemented write for message {:?}", msg);
-      // }
+      _ => {
+        panic!("unimplemented write for message {:?}", msg);
+      }
     } // match chunk_type
     Ok(())
   } // pub async fn write
@@ -94,10 +99,10 @@ mod tests {
     use std::collections::HashMap;
 
   #[tokio::test]
-  async fn can_read_command_message() {
+  async fn can_read_command_response() {
     // this is really an integration test (ideally would be at a higher level)
     // std::env::set_var("RUST_LOG", "trace");
-    pretty_env_logger::init();
+    // pretty_env_logger::init();
      let bytes = bytes_from_hex_string(
      "02 00 07 5f 72 65 73 75  6c 74
       00 3f f0 00 00 00 00 00 00
@@ -169,8 +174,7 @@ mod tests {
       // opt_hash.insert("code".to_string(), Value::Utf8("NetConnection.Connect.Success".to_string()));
       // opt_hash.insert("level".to_string(), Value::Utf8("status".to_string()));
 
-        assert_eq!(m, Message::Command{
-                      name: "_result".to_string(),
+        assert_eq!(m, Message::Response{
                       id: 1,
                       data: Value::Object(data_hash),
                       opt: Value::Utf8("X".to_string())

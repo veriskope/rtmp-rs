@@ -1,29 +1,31 @@
 extern crate pretty_env_logger;
-
-use tokio::net::TcpStream;
+use std::thread::sleep;
 use url::Url;
+use std::time::Duration;
+use std::process::exit;
 
-#[tokio::main]
-async fn main() {
+fn main() {
   pretty_env_logger::init();
 
   let addr = "127.0.0.1:1935";
-  // let tcp = TcpStream::connect(addr).await?;
-  // cannot use the `?` operator in a function that returns `()`
-  // but it actually returns a result
-
-  let tcp = TcpStream::connect(addr).await.expect("tcp connection failed");
-  tcp.set_nodelay(true).expect("set_nodelay call failed");
 
   let url = Url::parse(&format!("rtmp://{}/vod/media", addr)).expect("url parse");
 
-  let mut conn = rtmp::Connection::new(url, tcp);
+  let mut conn = rtmp::Connection::new(url);
   // optional set timeout to 1 sec: conn.set_timeout(1000);  
-  conn.connect().await.expect("rtmp connection failed");
+  conn.connect_with_callback( |response| {
+    println!("connect response: {:?}", response);
+    exit(0);
+  }).expect("rtmp connect");
+  println!("waiting");
 
-  let mut input = String::new();
-  println!("press return to quit");
-  std::io::stdin().read_line(&mut input).expect("stdio read_line");
+  let some_time = Duration::from_millis(100);
+  loop {
+    sleep(some_time);
+  }
+  // let mut input = String::new();
+  // println!("press return to quit");
+  // std::io::stdin().read_line(&mut input).expect("stdio read_line");
 }
 
 

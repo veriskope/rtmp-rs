@@ -4,6 +4,8 @@
 use url::Url;
 use tokio::prelude::*;
 use tokio::{io::BufReader, net::TcpStream};
+use tokio::runtime::Runtime;
+
 pub mod error;
 mod chunk;
 use chunk::{Chunk, Signal, Message, Value};
@@ -48,116 +50,185 @@ mod tests {
 } // mod tests
 } // mod util
 
+pub struct Connection {
+  url: Url,
+  runtime: Runtime,
+}
 
-pub struct Connection<T = TcpStream> {
+impl Connection {
+  // todo: new_with_transport, then new can defer creation of connection
+  pub fn new(url: Url) -> Self {
+    info!(target: "rtmp::Connection", "new");
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+
+    Connection {
+      url,
+      runtime
+    }
+  }
+
+  // std API that returns immediately, then calls callback later
+  pub fn connect_with_callback(&mut self, f: impl Fn(Message) -> () + Send + 'static) 
+  -> Result<(), Box<dyn std::error::Error>>  {
+    trace!(target: "rtmp:connect_with_callback", "url: {}", self.url);
+    let (from_server_tx, from_server_rx) = std::sync::mpsc::channel::<Message>();
+    // let (to_server_tx, to_server_rx) = std::sync::mpsc::channel::<Message>();
+    // self.to_server_sender = Some(to_server_tx); 
+
+    let url = self.url.clone();
+    let _cn_handle = self.runtime.spawn(async move {
+      trace!(target: "rtmp:connect_with_callback", "spawn socket handler");
+      let mut cn = InnerConnection::new(url).await;
+      cn.connect().await.expect("rtmp connection");
+      cn.read_loop(from_server_tx).await.expect("read until socket closes");
+    });
+
+    let _res_handle = self.runtime.spawn(async move {
+      trace!(target: "rtmp:connect_with_callback", "spawn recv handler");
+      let res = from_server_rx.recv().unwrap();
+      f(res);
+    });
+
+    // self.runtime.block_on(async move {
+    //   _cn_handle.await.expect("waiting for cn");
+    //   _res_handle.await.expect("waiting for res");
+    // });
+
+    Ok(())
+  }
+
+
+}
+
+// private connection owned by read/write thread
+struct InnerConnection {
     url: Url,
-    cn: BufReader<T>,
+    cn: BufReader<TcpStream>,
     window_ack_size: u32,
 }
 
-impl<Transport: AsyncRead + AsyncWrite + Unpin> Connection<Transport> {
-    // consider passing ConnectionOptions with transport? and (URL | parts)
-    pub fn new(url: Url, transport: Transport) -> Self {
-      info!(target: "rtmp::Connection", "new");
-      Connection {
-        url,
-        cn: BufReader::new(transport),
-        window_ack_size: 2500000,
+impl InnerConnection {
+  pub async fn new(url: Url) -> Self {
+    let host = match url.host() {
+      Some(h) => h,
+      None => { panic!("host required") },   
+    };
+
+    let port = url.port().unwrap_or(1935);
+    let addr = format!("{}:{}", host, port);
+    let tcp = TcpStream::connect(addr).await.expect("tcp connection failed");
+    tcp.set_nodelay(true).expect("set_nodelay call failed");
+
+    InnerConnection {
+      url,
+      cn: BufReader::new(tcp),
+      window_ack_size: 2500000,
+    }
+  }
+  
+  async fn write(&mut self, bytes: &[u8]) -> usize {
+      let bytes_written = self.cn.write(bytes).await.expect("write");
+      if bytes_written == 0 {
+          panic!("connection unexpectedly closed");   // TODO: return real error
+      } else {
+          info!(target: "rtmp::Connection", "wrote {} bytes", bytes_written);
       }
-    }
+      self.cn.flush().await.expect("send_command: flush after write");
+      return bytes_written
+  }
 
-    async fn write(&mut self, bytes: &[u8]) -> usize {
-        let bytes_written = self.cn.write(bytes).await.expect("write");
-        if bytes_written == 0 {
-            panic!("connection unexpectedly closed");   // TODO: return real error
-        } else {
-            info!(target: "rtmp::Connection", "wrote {} bytes", bytes_written);
-        }
-        self.cn.flush().await.expect("send_command: flush after write");
-        return bytes_written
-    }
+  // pub async fn send_command(&mut self, command_name: String, params: &[Amf0Value]) -> Result<(), Box<dyn std::error::Error>> {
 
-    // pub async fn send_command(&mut self, command_name: String, params: &[Amf0Value]) -> Result<(), Box<dyn std::error::Error>> {
+  // async fn send_connect_command(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+  async fn send_connect_command(&mut self) -> io::Result<()> {
+      trace!(target: "rtmp::Connection", "send_connect_command");
 
-    // async fn send_connect_command(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-    async fn send_connect_command(&mut self) -> io::Result<()> {
-        trace!(target: "rtmp::Connection", "send_connect_command");
+      let mut properties = HashMap::new();
+      let app_name = "vod/media".to_string();
+      properties.insert("app".to_string(), Value::Utf8(app_name));
+      let flash_version = "MAC 10,0,32,18".to_string();   // TODO: must we, really?
+      properties.insert("flashVer".to_string(), Value::Utf8(flash_version));
+      // properties.insert("objectEncoding".to_string(), Amf0Value::Number(0.0));
+      properties.insert("tcUrl".to_string(), Value::Utf8(self.url.to_string()));
 
-        let mut properties = HashMap::new();
-        let app_name = "vod/media".to_string();
-        properties.insert("app".to_string(), Value::Utf8(app_name));
-        let flash_version = "MAC 10,0,32,18".to_string();   // TODO: must we, really?
-        properties.insert("flashVer".to_string(), Value::Utf8(flash_version));
-        // properties.insert("objectEncoding".to_string(), Amf0Value::Number(0.0));
-        properties.insert("tcUrl".to_string(), Value::Utf8(self.url.to_string()));
+      let msg = Message::Command { name: "connect".to_string(),
+                                    id: 1,
+                                    data: Value::Object(properties),
+                                    opt: Value::Null };
 
-        let msg = Message::Command { name: "connect".to_string(),
-                                     id: 1,
-                                     data: Value::Object(properties),
-                                     opt: Value::Null };
+      Chunk::write(&mut self.cn, Chunk::Msg(msg)).await.expect("chunk write");
+      Ok(())
+  }
 
-        Chunk::write(&mut self.cn, Chunk::Msg(msg)).await.expect("chunk write");
+  // handle protocol control messages, yield control and return
+  // any message for 
+  pub async fn read_loop(&mut self, tx: std::sync::mpsc::Sender<Message>) -> io::Result<()> {
+        // expected connect sequence
+        // <---- Window Ack Size from server
+        // <---- Set Peer Bandwidth from server
+        // ----> Set Peer Bandwidth send to server
+    loop {
+        let (chunk, num_bytes) = Chunk::read(&mut self.cn).await?;
+        trace!(target: "rtmp::Connection", "{:?}", chunk);
+        trace!(target: "rtmp::Connection", "parsed {} bytes", num_bytes);
+        match chunk {
+          Chunk::Control(Signal::SetWindowAckSize(size)) => {
+            self.window_ack_size = size;
+            warn!(target: "rtmp::Connection", "SetWindowAckSize - saving variable, but functionality is unimplemented")
+          },
+          Chunk::Control(Signal::SetPeerBandwidth(size, _limit)) => {
+            self.window_ack_size = size;
+            warn!(target: "rtmp::Connection", "ignoring bandwidth limit request")
+          },
+          Chunk::Msg(m) => {
+            match m {
+              // Command { name: String, id: u32, data: Value, opt: Value },
 
-        loop {
-          // expected connect sequence
-          // <---- Window Ack Size from server
-          // <---- Set Peer Bandwidth from server
-          // ----> Set Peer Bandwidth send to server
-          // write chunk
-
-          let (chunk, num_bytes) = Chunk::read(&mut self.cn).await?;
-          trace!(target: "rtmp::Connection", "{:?}", chunk);
-          trace!(target: "rtmp::Connection", "parsed {} bytes", num_bytes);
-          match chunk {
-            Chunk::Control(Signal::SetWindowAckSize(size)) => {
-              self.window_ack_size = size;
-              warn!(target: "rtmp::Connection", "SetWindowAckSize - saving variable, but functionality is unimplemented")
-            },
-            Chunk::Control(Signal::SetPeerBandwidth(size, _limit)) => {
-              self.window_ack_size = size;
-              warn!(target: "rtmp::Connection", "ignoring bandwidth limit request")
-            },
-            Chunk::Msg(m) => {
-              warn!(target: "rtmp::Connection", "got message: {:?}", m);
-              // need to propagate to client
-            }
-            _ => warn!(target: "rtmp::Connection", "unhandled chunk: {:?}", chunk)
-          }
-        }
-        // unreachable Ok(())
-    }
-
-    //pub async fn connect(&mut self) -> Result<(), Error> {
-    // error[E0412]: cannot find type `Error` in this scope
-    pub async fn connect(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        let mut handshake = Handshake::new(PeerType::Client);
-        let c0_and_c1 = handshake.generate_outbound_p0_and_p1().unwrap();
-        self.cn.write(&c0_and_c1).await.expect("write c0_and_c1");
-
-        let mut read_buffer = [0_u8; 1024];
-        loop {
-            let num_bytes = self.cn.read(&mut read_buffer).await.expect("read");
-            if num_bytes == 0 {
-                panic!("connection unexpectedly closed");   // TODO: return real error?
-            }
-            trace!(target: "rtmp::connect", "bytes read: {}", num_bytes);
-                let (is_finished, response_bytes) = match handshake.process_bytes(&read_buffer) {
-                Err(x) => panic!("Error returned: {:?}", x),
-                Ok(HandshakeProcessResult::InProgress {response_bytes: bytes}) => (false, bytes),
-                Ok(HandshakeProcessResult::Completed {response_bytes: bytes, remaining_bytes: _}) => (true, bytes)
+              Message::Response { id: _, data: _, opt: _} => {
+                  tx.send(m).unwrap();   
+              },
+              _ => warn!(target: "rtmp::Connection", "unhandled message: {:?}", m),
             };
-            if response_bytes.len() > 0 {
-                self.write(&response_bytes).await;
-            }
-            if is_finished {
-              self.send_connect_command().await?;
-              break;
-            }
+          }
+          _ => warn!(target: "rtmp::Connection", "unhandled chunk: {:?}", chunk)
         }
-        Ok(())
-    }
+      }
+      // unreachable Ok(())
+  }
 
+  //pub async fn connect(&mut self) -> Result<(), Error> {
+  // error[E0412]: cannot find type `Error` in this scope
+  pub async fn connect(&mut self) -> Result<(), Box<dyn std::error::Error>> 
+  {
+      let mut handshake = Handshake::new(PeerType::Client);
+      let c0_and_c1 = handshake.generate_outbound_p0_and_p1().unwrap();
+      self.cn.write(&c0_and_c1).await.expect("write c0_and_c1");
 
+      loop {    // keep reading until we complete the handshake
+        let mut read_buffer = [0_u8; 1024];
+        let num_bytes = self.cn.read(&mut read_buffer).await.expect("read");
+        if num_bytes == 0 {
+            panic!("connection unexpectedly closed");   // TODO: return real error?
+        }
+        trace!(target: "rtmp::connect", "bytes read: {}", num_bytes);
+        let (is_finished, response_bytes) = match handshake.process_bytes(&read_buffer) {
+          Err(x) => panic!("Error returned: {:?}", x),
+          Ok(HandshakeProcessResult::InProgress {response_bytes: bytes}) => (false, bytes),
+          Ok(HandshakeProcessResult::Completed {response_bytes: bytes, remaining_bytes: _}) => (true, bytes)
+        };
+        if response_bytes.len() > 0 {
+            let size = self.write(&response_bytes).await;
+            if size == 0 { panic!("unexpected socket close"); }
+          }
+        if is_finished {
+          trace!(target: "rtmp::connect", "handshake completed");
+          break;
+        }
+      }
+      self.send_connect_command().await.expect("send_connect_command");
+
+      Ok(())
+  }
 
 }
 
