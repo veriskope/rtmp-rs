@@ -63,6 +63,24 @@ impl Message {
         }
     } // match chunk_type
   } // pub async fn read
+
+  pub async fn write<T>(mut writer: T, msg: Message) -> io::Result<()>
+  where T: AsyncWrite + Unpin
+  {
+    info!(target: "message::write", "Message: {:?}", msg);
+    match msg {
+      Message::Command { name, id, data, opt } => {
+        Value::write(&mut writer, Value::Utf8(name)).await.expect("write AMF command name");
+        Value::write(&mut writer, Value::Number(id.into())).await.expect("write AMF transaction id");
+        Value::write(&mut writer, data).await.expect("write AMF command data");
+        Value::write(&mut writer, opt).await.expect("write AMF optional info");
+      },
+      // _ => {
+      //   panic!("unimplemented write for message {:?}", msg);
+      // }
+    } // match chunk_type
+    Ok(())
+  } // pub async fn write
 } // impl Message
 
 #[cfg(test)]
@@ -81,8 +99,8 @@ mod tests {
     // 02 00 07 5f 72 65 73 75  6c 74  Utf8("_result")
     // 00 3f f0 00 00 00 00 00 00      Number(1.0)
     //
-    //  Object({"mode": Number(1.0), 
-    //          "capabilities": Number(255.0), 
+    //  Object({"mode": Number(1.0),
+    //          "capabilities": Number(255.0),
     //          "fmsVer": Utf8String("FMS/5,0,15,5004")})
     //
      // 03                              Object marker
@@ -101,15 +119,15 @@ mod tests {
      let bytes = bytes_from_hex_string(
      "02 00 07 5f 72 65 73 75  6c 74
       00 3f f0 00 00 00 00 00 00
-      03 
-      00 06 66 6d 73 56 65 72 
-      02 00 0f 46 4d 53 2f 35 2c 30 2c 31  35 2c 35 30 30 34 
-      00 0c 63 61 70 61 62 69 6c 69  74 69 65 73 
-      00 40 6f e0 00 00 00 00 00 
-      00 04 6d 6f 64 65 
-      00 3f f0 00 00 00 00 00 00 
-      00 00 
-      09 
+      03
+      00 06 66 6d 73 56 65 72
+      02 00 0f 46 4d 53 2f 35 2c 30 2c 31  35 2c 35 30 30 34
+      00 0c 63 61 70 61 62 69 6c 69  74 69 65 73
+      00 40 6f e0 00 00 00 00 00
+      00 04 6d 6f 64 65
+      00 3f f0 00 00 00 00 00 00
+      00 00
+      09
       02 00 01 58");
 
 
@@ -123,13 +141,13 @@ mod tests {
       // 64 65 73 63 72 69 70 74  69 6f 6e 02 00 15 43 6f
       // 6e 6e 65 63 74 69 6f 6e  20 73 75 63 63 65 65 64
       // 65 64 2e 00 0e 6f 62 6a  65 63 74 45 6e 63 6f 64
-      // 69 6e 67 00 00 00 00 00  00 00 00 00 00 04 
-      // 64 61 74 61 
-      // 08 
-      // 00 00 00 00 
+      // 69 6e 67 00 00 00 00 00  00 00 00 00 00 04
+      // 64 61 74 61
+      // 08
+      // 00 00 00 00
       // 00 07 76 65 72 73 69 6f 6e
       // 02 00 0b 35 2c 30 2c 31  35 2c 35 30 30 34 00 00
-      // 09 
+      // 09
       // 00 00 09");
 
       let buf: &[u8] = &bytes;

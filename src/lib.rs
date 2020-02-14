@@ -6,13 +6,12 @@ use tokio::prelude::*;
 use tokio::{io::BufReader, net::TcpStream};
 pub mod error;
 mod chunk;
-use chunk::{Chunk, Signal};
+use chunk::{Chunk, Signal, Message, Value};
 
 mod handshake;
 use handshake::{HandshakeProcessResult, Handshake, PeerType};
 
 use log::{info, trace, warn};
-use rml_amf0::{Amf0Value};
 use std::collections::HashMap;
 
 pub mod util {
@@ -83,43 +82,22 @@ impl<Transport: AsyncRead + AsyncWrite + Unpin> Connection<Transport> {
     // async fn send_connect_command(&mut self) -> Result<(), Box<dyn std::error::Error>> {
     async fn send_connect_command(&mut self) -> io::Result<()> {
         trace!(target: "rtmp::Connection", "send_connect_command");
+
         let mut properties = HashMap::new();
-
-        let command_name = "connect".to_string();
-        let app = "vod/media".to_string();
-        properties.insert("app".to_string(), Amf0Value::Utf8String(app));
+        let app_name = "vod/media".to_string();
+        properties.insert("app".to_string(), Value::Utf8(app_name));
         let flash_version = "MAC 10,0,32,18".to_string();   // TODO: must we, really?
-        properties.insert("flashVer".to_string(), Amf0Value::Utf8String(flash_version));
+        properties.insert("flashVer".to_string(), Value::Utf8(flash_version));
         // properties.insert("objectEncoding".to_string(), Amf0Value::Number(0.0));
-        properties.insert("tcUrl".to_string(), Amf0Value::Utf8String(self.url.to_string()));
+        properties.insert("tcUrl".to_string(), Value::Utf8(self.url.to_string()));
 
-        //let params = [Amf0Value::Object(properties)];
-        // TODO: Amf0Value - should implement Copy, & API shouldn't need copy
+        let msg = Message::Command { name: "connect".to_string(),
+                                     id: 1,
+                                     data: Value::Object(properties),
+                                     opt: Value::Null };
 
-        let arguments = Amf0Value::Object(properties);
+        Chunk::write(&mut self.cn, Chunk::Msg(msg)).await.expect("chunk write");
 
-        let transaction_id:f64 = 1.0;   // connect message is always 1, TODO: increment later
-        let values = vec![
-            Amf0Value::Utf8String(command_name),
-            Amf0Value::Number(transaction_id),
-            arguments       // connect has one param, should allow array
-        ];
-        // TODO
-        Chunk::write(&mut self.cn, Chunk::Placeholder).await.expect("chunk write");
-
-        let bytes = rml_amf0::serialize(&values).expect("serialize command argument");
-        trace!(target: "rtmp::Connection","{:02x?}", bytes);
-        let message_length = bytes.len();
-        trace!(target: "rtmp::Connection", "length: {}", message_length);
-
-
-        // hardcode chunkstream message header
-        let cs_id: u8 = 3;
-        let hex_str = format!("{:02x} 00 00 00 00 00 {:02x} 14  00 00 00 00", cs_id, message_length);
-        let chunk_header = util::bytes_from_hex_string(&hex_str);
-        self.write(&chunk_header).await;
-
-        self.write(&bytes).await;
         loop {
           // expected connect sequence
           // <---- Window Ack Size from server
@@ -139,6 +117,10 @@ impl<Transport: AsyncRead + AsyncWrite + Unpin> Connection<Transport> {
               self.window_ack_size = size;
               warn!(target: "rtmp::Connection", "ignoring bandwidth limit request")
             },
+            Chunk::Msg(m) => {
+              warn!(target: "rtmp::Connection", "got message: {:?}", m);
+              // need to propagate to client
+            }
             _ => warn!(target: "rtmp::Connection", "unhandled chunk: {:?}", chunk)
           }
         }
@@ -165,7 +147,7 @@ impl<Transport: AsyncRead + AsyncWrite + Unpin> Connection<Transport> {
                 Ok(HandshakeProcessResult::Completed {response_bytes: bytes, remaining_bytes: _}) => (true, bytes)
             };
             if response_bytes.len() > 0 {
-                self.write(&response_bytes).await; 
+                self.write(&response_bytes).await;
             }
             if is_finished {
               self.send_connect_command().await?;
