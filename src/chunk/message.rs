@@ -38,7 +38,11 @@ impl Message {
           trace!(target: "message::read", "transaction_id_value = {:?}", transaction_id_value);
           let data = Value::read(&mut reader).await.expect("read command data");
           trace!(target: "message::read", "command data = {:?}", data);
-          let opt = Value::read(&mut reader).await.expect("read optional data");
+          let opt = match data {
+            Value::Null => Value::Null,
+            _ => Value::read(&mut reader).await.expect("read optional data"),
+          };
+
           trace!(target: "message::read", "optional data = {:?}", opt);
 
           // = note: for more information, see https://github.com/rust-lang/rust/issues/53667
@@ -85,8 +89,7 @@ impl Message {
 
 #[cfg(test)]
 mod tests {
-    // Note this useful idiom: importing names from outer (for mod tests) scope.
-    use super::*;
+    use super::*;  // importing names from outer (for mod tests) scope.
     use crate::util::bytes_from_hex_string;
     use std::collections::HashMap;
 
@@ -94,8 +97,21 @@ mod tests {
   async fn can_read_command_message() {
     // this is really an integration test (ideally would be at a higher level)
     // std::env::set_var("RUST_LOG", "trace");
-    // std::env::set_var("RUST_LOG", "info");
     pretty_env_logger::init();
+     let bytes = bytes_from_hex_string(
+     "02 00 07 5f 72 65 73 75  6c 74
+      00 3f f0 00 00 00 00 00 00
+      03
+      00 06 66 6d 73 56 65 72
+      02 00 0f 46 4d 53 2f 35 2c 30 2c 31  35 2c 35 30 30 34
+      00 0c 63 61 70 61 62 69 6c 69  74 69 65 73
+      00 40 6f e0 00 00 00 00 00
+      00 04 6d 6f 64 65
+      00 3f f0 00 00 00 00 00 00
+      00 00
+      09
+      02 00 01 58");
+
     // 02 00 07 5f 72 65 73 75  6c 74  Utf8("_result")
     // 00 3f f0 00 00 00 00 00 00      Number(1.0)
     //
@@ -115,21 +131,6 @@ mod tests {
     //  Object({"level": Utf8String("status"),
     //           "code": Utf8String("NetConnection.Connect.Success"),
     //           "description": Utf8String("Connection succeeded."),
-
-     let bytes = bytes_from_hex_string(
-     "02 00 07 5f 72 65 73 75  6c 74
-      00 3f f0 00 00 00 00 00 00
-      03
-      00 06 66 6d 73 56 65 72
-      02 00 0f 46 4d 53 2f 35 2c 30 2c 31  35 2c 35 30 30 34
-      00 0c 63 61 70 61 62 69 6c 69  74 69 65 73
-      00 40 6f e0 00 00 00 00 00
-      00 04 6d 6f 64 65
-      00 3f f0 00 00 00 00 00 00
-      00 00
-      09
-      02 00 01 58");
-
 
     //  64 61 74 61  "data"
     //           "data": Object({"version": Utf8String("5,0,15,5004")}),
@@ -177,5 +178,34 @@ mod tests {
                 );
     }
 
+    #[tokio::test]
+    async fn can_read_command_message_with_no_data() {
+      pretty_env_logger::init();
 
+       let bytes = bytes_from_hex_string(
+       "02 00 08 6f 6e 42 57 44 6f 6e 65 00 00 00 00 00 00 00 00 00 05");
+        // 02                             Utf8 marker
+        // 00 08                          length=8
+        // 6f 6e 42 57 44 6f 6e 65        "onBWDone"
+        // 00                             Number marker
+        // 00 00 00 00 00 00 00 00        0
+        // 05                             Null
+
+        let buf: &[u8] = &bytes;
+        let m = Message::read(buf, 20, bytes.len() as u32).await.expect("read");
+
+        let mut data_hash = HashMap::new();
+        data_hash.insert("fmsVer".to_string(), Value::Utf8("FMS/5,0,15,5004".to_string()));
+        data_hash.insert("capabilities".to_string(), Value::Number(255.0));
+        data_hash.insert("mode".to_string(), Value::Number(1.0));
+
+        assert_eq!(m,
+                  Message::Command {
+                      name: "onBWDone".to_string(),
+                      id: 0,
+                      data: Value::Null,
+                      opt: Value::Null
+                  } // end Message::Command
+                );
+      }
 } // mod tests

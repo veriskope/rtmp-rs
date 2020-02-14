@@ -1,4 +1,4 @@
-use log::{info, warn};
+use log::{info, trace, warn};
 use tokio::prelude::*;
 pub mod amf;
 pub use amf::Value;
@@ -88,6 +88,7 @@ impl Chunk {
       warn!(target: "chunk", "bytes_read {} < length {}", bytes_read, length);
       panic!("expected {} bytes got {} bytes", length, bytes_read);
     }
+    trace!(target: "chunk", "payload: {:02x?}", message_buf);
     let mut chunk_reader: &[u8] = &message_buf;
 
     let chunk: Chunk = match type_byte {
