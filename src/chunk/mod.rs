@@ -19,6 +19,7 @@ pub use signal::Signal as Signal;   // export Signal as part of this module
 
 mod message;
 pub use message::Message as Message;
+pub use message::Status as Status;
 
 // the table of constants could be merged with Enum declaration with
 // https://github.com/rust-lang/rust/issues/60553
@@ -162,7 +163,7 @@ mod tests {
 
     let cmd = Message::Command {
               name: "connect".to_string(),
-              id: 1,
+              id: 1.0,
               data: Value::Object(properties),     // shouldn't this be an array?
               opt: Value::Null };
 

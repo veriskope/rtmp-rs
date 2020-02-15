@@ -1,15 +1,24 @@
 use tokio::prelude::*;
 extern crate proc_macro;
-use log::{info, trace};
+use log::{info, trace, warn};
 use super::amf::Value;
+use std::fmt;
 
 // TODO: can we just derive Read on these, given that we know type?
 #[derive(Debug, PartialEq)]
 pub enum Message {
   //Placeholder,
-  // TODO: is highest f64 integer < u32?
-  Command { name: String, id: u32, data: Value, opt: Value },
-  Response { id: u32, data: Value, opt: Value },
+  Command { name: String, id: f64, data: Value, opt: Value },
+  Response { id: f64, data: Value, opt: Value },
+}
+
+impl fmt::Display for Message {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match self {
+      Message::Command { name, id, ..} => write!(f, "Command '{}' #{}", name, id),
+      Message::Response { id, ..} => write!(f, "Response '_result' #{}", id),
+    }
+  }
 }
 
 //   AudioMessage         = 08,
@@ -22,7 +31,71 @@ pub enum Message {
 // CommandMessage0        = 20,       // 0x14
 //   AggregateMessage     = 22,
 
+
+// maybe should be...
+// pub struct Status<'a> {
+//   code: &'a str,
+//   level: &'a str,
+//   encoding: u32,
+//   description: &'a str,
+// }
+
+#[derive(Debug, PartialEq)]
+pub struct Status {
+  pub code: String,
+  pub encoding: u32,
+  pub description: String,
+}
+
 impl Message {
+  pub fn get_status(&self) -> Option<Status> {
+    match &self {
+      Message::Response { id:_, data:_, opt } => {
+        match opt {
+          Value::Object(h) => {
+            // expected...
+            // {"code": Utf8("NetConnection.Connect.Success"),
+            //  "level": Utf8("status"),
+            //  "objectEncoding": Number(0.0),
+            //   "description": Utf8("Connection succeeded.")}) }
+            if let Some(level_value) = h.get(&"level".to_string()) {
+              if *level_value != Value::Utf8("status".to_string()) {
+                return None
+              }
+              let mut code = "".to_string();
+              if let Some(code_value) = h.get("code") {
+                if let Value::Utf8(code_string) = code_value {
+                  code = (*code_string).to_string();
+                }
+              };
+              if code == "".to_string() {
+                warn!(target: "Message::get_status", "did not find code value in opt: {:?}", opt);
+              }
+
+              let mut encoding:u32 = 0;
+              if let Some(encoding_value) = h.get("objectEncoding") {
+                if let Value::Number(num) = encoding_value {
+                  encoding = *num as u32;
+                };
+              };
+
+              let mut description = "".to_string();
+              if let Some(desc_value) = h.get("description") {
+                if let Value::Utf8(desc_string) = desc_value {
+                  description = (*desc_string).to_string();
+                }
+              }
+              return Some(Status { code, description, encoding })
+            }
+            None
+            },
+            _ => None,
+          }
+      },
+      _ => None,
+    }
+  }
+
   pub async fn read<T>(mut reader: T, chunk_type: u8, chunk_len: u32) -> io::Result<Message>
   where T: AsyncRead + Unpin
   {
@@ -50,8 +123,7 @@ impl Message {
           // = help: add `#![feature(let_chains)]` to the crate attributes to enable
           //if let Value::Utf8(cmd_value) = name && if let Value::Number(transaction_id_value) = transaction_id {
           if let Value::Utf8(name) = cmd_value  {
-            if let Value::Number(float_id) = transaction_id_value {
-              let id: u32 = float_id as u32;
+            if let Value::Number(id) = transaction_id_value {
 
               let msg = if name == "_result".to_string() {
                 Message::Response { id, data, opt }
@@ -175,7 +247,7 @@ mod tests {
       // opt_hash.insert("level".to_string(), Value::Utf8("status".to_string()));
 
         assert_eq!(m, Message::Response{
-                      id: 1,
+                      id: 1.0,
                       data: Value::Object(data_hash),
                       opt: Value::Utf8("X".to_string())
                   }
@@ -206,7 +278,7 @@ mod tests {
         assert_eq!(m,
                   Message::Command {
                       name: "onBWDone".to_string(),
-                      id: 0,
+                      id: 0.0,
                       data: Value::Null,
                       opt: Value::Null
                   } // end Message::Command
