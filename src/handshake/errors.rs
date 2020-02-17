@@ -1,3 +1,4 @@
+/*! originally written by Matt Shapiro (rust-media-libs) */
 //! Errors that can occur during the handshaking process
 
 use std::io;
