@@ -1,8 +1,5 @@
 use log::{info, trace, warn};
 use tokio::prelude::*;
-pub mod amf;
-pub use amf::Value;
-
 use crate::util;
 
 // use rml_amf0::{Amf0Value};
@@ -135,7 +132,7 @@ impl Chunk {
 mod tests {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
-    use amf::Value;
+    use crate::amf::Value;
     use std::collections::HashMap;
 
   #[tokio::test]

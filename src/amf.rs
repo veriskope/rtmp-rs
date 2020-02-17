@@ -27,20 +27,21 @@ enum Marker {
 }
 //TODO:   AvmPlusObject   = 17,    // 0x11
 
-// const EMPTY_STRING: u16 = 0x00;
-
 use Marker::*;
 
+// TODO: better to use str so this can be Copy
 #[derive(Debug, PartialEq)]
 pub enum Value {
   Number(f64),
   Boolean(bool),
-  Utf8(String),
+  Utf8(String),   
   Object(HashMap<String, Value>),
   Null,
   // Undefined,
 }
 impl Value {
+  
+  // TODO: add encoding parameter to read AMF0 or AMF3
   async fn read_string<T>(mut reader: T) -> io::Result<String>
   where T: AsyncRead + Unpin
   {
@@ -69,7 +70,6 @@ impl Value {
     Ok(utf8_string)
   }
 
-  // .take copies reader rather than mutating it -- probably a bug
   async fn read_number<T>(mut reader: T) -> io::Result<f64>
   where T: AsyncRead + Unpin
   {

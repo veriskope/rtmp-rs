@@ -1,4 +1,4 @@
-// used om amf0.rs
+// used in amf.rs
 #[macro_use] extern crate enum_primitive_derive;
 
 use url::Url;
@@ -10,8 +10,11 @@ use tokio::{io::BufReader, net::TcpStream};
 use tokio::runtime::Runtime;
 
 pub mod error;
+pub mod amf;
+use amf::Value;
+
 mod chunk;
-use chunk::{Chunk, Signal, Message, Value};
+use chunk::{Chunk, Signal, Message};
 
 mod stream;
 pub use stream::NetStream;
@@ -26,7 +29,7 @@ use std::collections::HashMap;
 pub mod util {
 use log::{trace};
 
-//fn bytes_from_hex_string(hex_str: &str) -> &[u8] {
+  //fn bytes_from_hex_string(hex_str: &str) -> &[u8] {
 pub fn bytes_from_hex_string(hex_str: &str) -> Vec<u8> {
   trace!(target: "util::bytes_from_hex_string", "hex_str: {}", hex_str);
   let result = hex_str.split_whitespace()

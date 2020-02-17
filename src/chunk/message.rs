@@ -1,7 +1,7 @@
 use tokio::prelude::*;
 extern crate proc_macro;
 use log::{info, trace, warn};
-use super::amf::Value;
+use crate::amf::Value;
 use std::fmt;
 
 // TODO: can we just derive Read on these, given that we know type?
