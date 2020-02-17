@@ -52,3 +52,14 @@ async fn main() {
   reducing dependencies once the basics are working
 - maybe use procedural macro to implement reading/writing of chunks with less 
   boilerplate code
+
+# License
+
+This library is distributed under same terms as the Rust language, under both the [MIT license](LICENSE-MIT.md) and the [Apache License (Version 2.0)]((LICENSE-APACHE.md)).
+
+## Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in this repository by you, shall be dual licensed as MIT and Apache 2.0, without any additional terms or conditions.
+
+ 
+
