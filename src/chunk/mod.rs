@@ -162,7 +162,7 @@ mod tests {
               name: "connect".to_string(),
               id: 1.0,
               data: Value::Object(properties),     // shouldn't this be an array?
-              opt: Value::Null };
+              opt: Vec::new() };
 
     let mut buf = Vec::new();
 

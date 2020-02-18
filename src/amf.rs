@@ -1,3 +1,6 @@
+extern crate derive_more;
+use derive_more::From;
+
 use log::{info, trace};
 use std::collections::HashMap;
 use tokio::prelude::*;
@@ -29,18 +32,118 @@ enum Marker {
 
 use Marker::*;
 
+type ValueMap = HashMap<String, Value>;
+
 // TODO: better to use str so this can be Copy
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, From)]
 pub enum Value {
   Number(f64),
   Boolean(bool),
-  Utf8(String),   
-  Object(HashMap<String, Value>),
+  Utf8(String),
+  Object(ValueMap),
   Null,
   // Undefined,
 }
+
+// Doc for #[derive(From)]
+/// # Examples
+///
+/// ```
+/// use rtmp::amf::Value;
+///
+/// let val: Value = (2.0).into();
+/// assert_eq!(val, Value::Number(2.0));
+///
+/// let val: Value = true.into();
+/// assert_eq!(val, Value::Boolean(true));
+///
+/// let s = "hello".to_string();
+/// let val: Value = s.into();
+/// assert_eq!(val, Value::Utf8("hello".to_string()));
+///
+/// let val: Value = "hello".into();
+/// assert_eq!(val, Value::Utf8("hello".to_string()));
+/// ```
+impl std::convert::From<&str> for Value {
+  fn from(s: &str) -> Self {
+    Value::Utf8(s.to_string())
+  }
+}
+
+// pub enum Error {
+//   NumberValueExpected
+// }
+
+//   fn try_from(v: Value) -> Result<Self, Self::Error> {
+//     match v {
+//       Value::Number(n) => Ok(n),
+//       _ => Err(Error::NumberValueExpected),
+//     }
+//   }
+// }
+
 impl Value {
-  
+  ///
+  /// ```
+  /// use rtmp::amf::Value;
+  /// let val = Value::Number(1.0);
+  /// let num = val.as_number().unwrap();
+  /// assert_eq!(num, 1.0);
+  /// ```
+  pub fn as_number(&self) -> Option<f64> {
+    match self {
+      Value::Number(n) => Some(*n),
+      _ => None
+    }
+  }
+  ///
+  /// ```
+  /// use rtmp::amf::Value;
+  /// let val = Value::Utf8("hello".to_string());
+  /// let s = val.as_string().unwrap();
+  /// assert_eq!(s, "hello".to_string());
+  /// ```
+  pub fn as_string(&self) -> Option<String> {
+    match self {
+      Value::Utf8(s) => Some(s.to_owned()),
+      _ => None
+    }
+  }
+
+  pub fn as_str<'a>(&'a self) -> Option<&'a str> {
+    match self {
+      Value::Utf8(s) => Some(s.as_str()),
+      _ => None
+    }
+  }
+
+
+  pub fn object_get_string(h: &ValueMap, label: &str) -> Option<String> {
+    if let Some(value_ref) = h.get(&label.to_string()) {
+      (*value_ref).as_string()
+    } else {
+      None
+    }
+  }
+
+  pub fn object_get_str<'a>(h: &'a ValueMap, label: &str) -> Option<&'a str> {
+    if let Some(value_ref) = h.get(&label.to_string()) {
+      (*value_ref).as_str()
+    } else {
+      None
+    }
+  }
+
+
+
+  pub fn object_get_number(h: &ValueMap, label: &str) -> Option<f64> {
+    if let Some(value_ref) = h.get(&label.to_string()) {
+      (*value_ref).as_number()
+    } else {
+      None
+    }
+  }
+
   // TODO: add encoding parameter to read AMF0 or AMF3
   async fn read_string<T>(mut reader: T) -> io::Result<String>
   where T: AsyncRead + Unpin

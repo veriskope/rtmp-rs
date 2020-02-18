@@ -3,7 +3,7 @@
 
 use url::Url;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, AtomicU32, Ordering};
 
 use tokio::prelude::*;
 use tokio::{io::BufReader, net::TcpStream};
@@ -63,8 +63,10 @@ mod tests {
 pub struct Connection {
   url: Url,
   runtime: Runtime,
-  streams: HashMap<u32, Arc<NetStream>>,
+  // TODO: keep track of streams so we can clean them up?
   next_stream_id: Arc<AtomicU32>,
+  to_server_tx: std::sync::mpsc::Sender<Message>, // messages destined for server go here
+  to_server_rx: Option<std::sync::mpsc::Receiver<Message>>, // process loop grabs them from here
 }
 
 impl Connection {
@@ -72,26 +74,23 @@ impl Connection {
   pub fn new(url: Url) -> Self {
     info!(target: "rtmp::Connection", "new");
     let runtime = tokio::runtime::Runtime::new().unwrap();
+    let (to_server_tx, to_server_rx) = std::sync::mpsc::channel::<Message>();
 
     Connection {
       url,
       runtime,
-      streams: HashMap::new(),
       next_stream_id: Arc::new(AtomicU32::new(1)),
+      to_server_tx,
+      to_server_rx: Some(to_server_rx),   // consumed by process_loop
     }
   }
 
-  pub fn new_stream(&mut self) -> Arc<NetStream> {
-    // stream id can be anything
-    // except 0 seems to be reserved for NetConnection
-    // so we just start at 1 and increment the id when we need new ones
-    let id = self.next_stream_id.fetch_add(1, Ordering::SeqCst);
-    let ns = Arc::new(NetStream::new(id));
-    self.streams.insert(id, ns.clone());
-
-    //TODO self.inner.create_stream().await.expect("send command 'createStream'");
-
-    ns
+  pub fn new_stream(&mut self) -> NetStream {
+      // stream id can be anything
+      // except 0 seems to be reserved for NetConnection
+      // so we just start at 1 and increment the id when we need new ones
+      let id = self.next_stream_id.fetch_add(1, Ordering::SeqCst);
+      NetStream::new(id, self.to_server_tx.clone())
   }
 
 
@@ -101,15 +100,17 @@ impl Connection {
   -> Result<(), Box<dyn std::error::Error>>  {
     trace!(target: "rtmp:connect_with_callback", "url: {}", self.url);
     let (from_server_tx, from_server_rx) = std::sync::mpsc::channel::<Message>();
-    // let (to_server_tx, to_server_rx) = std::sync::mpsc::channel::<Message>();
-    // self.to_server_sender = Some(to_server_tx);
+    
+    // ownership will move to thread for processing messages
+    let to_server_rx_option = std::mem::replace(&mut self.to_server_rx, None);
+    let to_server_rx = to_server_rx_option.expect("to_server_rx should be defined");
 
     let url = self.url.clone();
     let _cn_handle = self.runtime.spawn(async move {
       trace!(target: "rtmp:connect_with_callback", "spawn socket handler");
-      let mut cn = InnerConnection::new(url).await;
+      let mut cn = InnerConnection::new(url, to_server_rx).await;
       cn.connect().await.expect("rtmp connection");
-      cn.read_loop(from_server_tx).await.expect("read until socket closes");
+      cn.process_message_loop(from_server_tx).await.expect("read until socket closes");
     });
 
     let _res_handle = self.runtime.spawn(async move {
@@ -145,13 +146,15 @@ impl Connection {
 // private connection owned by read/write thread
 struct InnerConnection {
     url: Url,
+    rx_to_server: std::sync::mpsc::Receiver<Message>,
     cn: BufReader<TcpStream>,
     window_ack_size: u32,
     next_cmd_id: AtomicUsize,
+    is_connected: AtomicBool,
 }
 
 impl InnerConnection {
-  pub async fn new(url: Url) -> Self {
+  pub async fn new(url: Url, rx_to_server: std::sync::mpsc::Receiver<Message>) -> Self {
     let host = match url.host() {
       Some(h) => h,
       None => { panic!("host required") },
@@ -164,9 +167,11 @@ impl InnerConnection {
 
     InnerConnection {
       url,
+      rx_to_server,
       cn: BufReader::new(tcp),
       window_ack_size: 2500000,
       next_cmd_id: AtomicUsize::new(1),
+      is_connected: AtomicBool::new(false),
     }
   }
 
@@ -185,16 +190,6 @@ impl InnerConnection {
       return bytes_written
   }
 
-  pub async fn create_stream(&mut self) -> io::Result<()> {
-    let msg = Message::Command { name: "createStream".to_string(),
-                                  id: self.get_next_cmd_id(),
-                                  data: Value::Null,
-                                  opt: Value::Null };
-
-    Chunk::write(&mut self.cn, Chunk::Msg(msg)).await.expect("chunk write createStream command");
-    Ok(())
-  }
-
   // async fn send_connect_command(&mut self) -> Result<(), Box<dyn std::error::Error>> {
   async fn send_connect_command(&mut self) -> io::Result<()> {
       trace!(target: "rtmp::Connection", "send_connect_command");
@@ -210,20 +205,37 @@ impl InnerConnection {
       let msg = Message::Command { name: "connect".to_string(),
                                     id: self.get_next_cmd_id(),
                                     data: Value::Object(properties),
-                                    opt: Value::Null };
+                                    opt: Vec::new() };
 
       Chunk::write(&mut self.cn, Chunk::Msg(msg)).await.expect("chunk write");
       Ok(())
   }
-
-  // handle protocol control messages, yield control and return
-  // any message for
-  pub async fn read_loop(&mut self, tx: std::sync::mpsc::Sender<Message>) -> io::Result<()> {
+  fn is_connected(&self) -> bool {
+    self.is_connected.load(Ordering::SeqCst)
+  }
+  // read messages from TCPStream
+  // - handle protocol control messages
+  // - send RTMP messages via tx
+  // after connecting to server, then handle sending messages
+  // - recv messages (via self.rx_to_server) and write as chunks
+  pub async fn process_message_loop(&mut self, tx: std::sync::mpsc::Sender<Message>) -> io::Result<()> {
         // expected connect sequence
         // <---- Window Ack Size from server
         // <---- Set Peer Bandwidth from server
         // ----> Set Peer Bandwidth send to server
     loop {
+        if self.is_connected() {  
+          // if we've connected to the server, then check if we have a request to send a message to the server
+          let result = self.rx_to_server.try_recv();
+          if let Ok(mut outgoing_msg) = result {
+            // TODO: this shouldn't be synchronous
+            if let Message::Command { name, id: _, data, opt} = outgoing_msg {
+              // make sure we have unique transaction ids
+              outgoing_msg = Message::Command { name, id: self.get_next_cmd_id(), data, opt };
+            };
+            Chunk::write(&mut self.cn, Chunk::Msg(outgoing_msg)).await.expect("chunk write message from queue");
+          }
+        }
         let (chunk, num_bytes) = Chunk::read(&mut self.cn).await?;
         trace!(target: "rtmp::Connection", "{:?}", chunk);
         trace!(target: "rtmp::Connection", "parsed {} bytes", num_bytes);
@@ -242,6 +254,11 @@ impl InnerConnection {
 
               Message::Response { id: _, data: _, opt: _} => {
                   trace!(target: "rtmp::Connection", "tx: {}", m);
+                  if let Some(status) = m.get_status() {
+                    if status.code == "NetConnection.Connect.Success" {
+                      self.is_connected.fetch_or(true, Ordering::SeqCst);
+                    } // TODO: check for disconnect
+                  }
                   tx.send(m).expect("transfer message to trigger callback");
               },
               _ => warn!(target: "rtmp::Connection", "unhandled message: {:?}", m),
