@@ -1,24 +1,21 @@
-use std::str::FromStr;
 use std::fmt;
-
+use std::str::FromStr;
 #[derive(Debug, PartialEq)]
 pub enum RecordFlag {
-    Live,
-    Record,
-    Append
+  Live,
+  Record,
+  Append,
 }
 
 #[derive(PartialEq, Debug)]
 pub enum Error {
-    RecordFlagParse,
+  RecordFlagParse,
 }
-
 
 impl FromStr for RecordFlag {
   type Err = Error;
 
   fn from_str(s: &str) -> Result<Self, Self::Err> {
-
     match s {
       "live" => Ok(RecordFlag::Live),
       "record" => Ok(RecordFlag::Record),
@@ -38,13 +35,12 @@ impl fmt::Display for RecordFlag {
   }
 }
 
-
 #[cfg(test)]
 mod tests {
-    use super::*;   // importing names from outer (for mod tests) scope.
+  use super::*; // importing names from outer (for mod tests) scope.
 
-    #[test]
-    fn live_from_str() {
-      assert_eq!(RecordFlag::from_str("live"), Ok(RecordFlag::Live));
-    }
+  #[test]
+  fn live_from_str() {
+    assert_eq!(RecordFlag::from_str("live"), Ok(RecordFlag::Live));
+  }
 }
