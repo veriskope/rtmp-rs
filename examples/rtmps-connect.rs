@@ -8,7 +8,7 @@ extern crate pretty_env_logger;
 #[tokio::main]
 async fn main() {
   pretty_env_logger::init();
-  
+
   let _addr = "live-api-s.facebook.com:443";
 
   // let tcp = TcpStream::connect(addr).await?;
@@ -25,12 +25,12 @@ async fn main() {
   // let url = Url::parse(&format!("rtmps://{}:443/rtmp/", addr)).expect("url parse");
 
   // let mut conn = rtmp::Connection::new(url, socket);
-  // // optional set timeout to 1 sec: conn.set_timeout(1000);  
+  // // optional set timeout to 1 sec: conn.set_timeout(1000);
   // conn.connect( |_| {}).await.expect("rtmp connection failed");
 
   let mut input = String::new();
   println!("press return to quit");
-  std::io::stdin().read_line(&mut input).expect("stdio read_line");
+  std::io::stdin()
+    .read_line(&mut input)
+    .expect("stdio read_line");
 }
-
-
