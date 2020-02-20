@@ -10,6 +10,9 @@ use tokio::runtime::Runtime;
 mod inner;
 use inner::InnerConnection;
 
+// used by inner
+// TODO: seems weird to "pub" when internal to module, but don't know syntax
+pub mod bufreadwriter;
 pub mod handshake;
 
 pub struct Connection {

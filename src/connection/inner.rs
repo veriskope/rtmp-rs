@@ -9,13 +9,14 @@ use tokio::{io::BufReader, net::TcpStream};
 use crate::amf::Value;
 use crate::chunk::{Chunk, Message, Signal};
 
+use super::bufreadwriter::BufReadWriter;
 use super::handshake::{Handshake, HandshakeProcessResult, PeerType};
 
 // private connection owned by read/write thread
 pub struct InnerConnection {
   url: Url,
   rx_to_server: std::sync::mpsc::Receiver<Message>,
-  cn: BufReader<TcpStream>,
+  cn: BufReadWriter<BufReader<TcpStream>>,
   window_ack_size: u32,
   next_cmd_id: AtomicUsize,
   is_connected: AtomicBool,
@@ -38,30 +39,19 @@ impl InnerConnection {
     InnerConnection {
       url,
       rx_to_server,
-      cn: BufReader::new(tcp),
+      cn: BufReadWriter::new(BufReader::new(tcp)),
       window_ack_size: 2500000,
       next_cmd_id: AtomicUsize::new(1),
       is_connected: AtomicBool::new(false),
     }
   }
 
-  fn get_next_cmd_id(&self) -> f64 {
-    self.next_cmd_id.fetch_add(1, Ordering::SeqCst) as f64
+  fn is_connected(&self) -> bool {
+    self.is_connected.load(Ordering::SeqCst)
   }
 
-  async fn write(&mut self, bytes: &[u8]) -> usize {
-    let bytes_written = self.cn.write(bytes).await.expect("write");
-    if bytes_written == 0 {
-      panic!("connection unexpectedly closed"); // TODO: return real error
-    } else {
-      info!(target: "rtmp::Connection", "wrote {} bytes", bytes_written);
-    }
-    self
-      .cn
-      .flush()
-      .await
-      .expect("send_command: flush after write");
-    return bytes_written;
+  fn get_next_cmd_id(&self) -> f64 {
+    self.next_cmd_id.fetch_add(1, Ordering::SeqCst) as f64
   }
 
   // async fn send_connect_command(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -83,13 +73,10 @@ impl InnerConnection {
       opt: Vec::new(),
     };
 
-    Chunk::write(&mut self.cn, Chunk::Msg(msg))
+    Chunk::write(&mut self.cn.buf, Chunk::Msg(msg))
       .await
       .expect("chunk write");
     Ok(())
-  }
-  fn is_connected(&self) -> bool {
-    self.is_connected.load(Ordering::SeqCst)
   }
   // read messages from TCPStream
   // - handle protocol control messages
@@ -125,12 +112,12 @@ impl InnerConnection {
               opt,
             };
           };
-          Chunk::write(&mut self.cn, Chunk::Msg(outgoing_msg))
+          Chunk::write(&mut self.cn.buf, Chunk::Msg(outgoing_msg))
             .await
             .expect("chunk write message from queue");
         }
       }
-      let (chunk, num_bytes) = Chunk::read(&mut self.cn).await?;
+      let (chunk, num_bytes) = Chunk::read(&mut self.cn.buf).await?;
       trace!(target: "rtmp::Connection", "{:?}", chunk);
       trace!(target: "rtmp::Connection", "parsed {} bytes", num_bytes);
       match chunk {
@@ -193,10 +180,11 @@ impl InnerConnection {
         }) => (true, bytes),
       };
       if response_bytes.len() > 0 {
-        let size = self.write(&response_bytes).await;
-        if size == 0 {
-          panic!("unexpected socket close");
-        }
+        self
+          .cn
+          .write_exact(&response_bytes)
+          .await
+          .expect("handshake");
       }
       if is_finished {
         trace!(target: "rtmp::connect", "handshake completed");
