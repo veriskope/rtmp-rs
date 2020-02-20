@@ -154,9 +154,7 @@ impl InnerConnection {
     // unreachable Ok(())
   }
 
-  //pub async fn connect(&mut self) -> Result<(), Error> {
-  // error[E0412]: cannot find type `Error` in this scope
-  pub async fn connect(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+  async fn connect_handshake(&mut self) -> io::Result<()> {
     let mut handshake = Handshake::new(PeerType::Client);
     let c0_and_c1 = handshake.generate_outbound_p0_and_p1().unwrap();
     self.cn.write(&c0_and_c1).await.expect("write c0_and_c1");
@@ -188,14 +186,16 @@ impl InnerConnection {
       }
       if is_finished {
         trace!(target: "rtmp::connect", "handshake completed");
-        break;
+        return Ok(());
       }
     }
-    self
-      .send_connect_command()
-      .await
-      .expect("send_connect_command");
+  }
 
+  //pub async fn connect(&mut self) -> Result<(), Error> {
+  // error[E0412]: cannot find type `Error` in this scope
+  pub async fn connect(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    self.connect_handshake().await.expect("handshake");
+    self.send_connect_command().await.expect("connect command");
     Ok(())
   }
 }
