@@ -48,17 +48,15 @@ impl Connection {
     NetStream::new(id, self.to_server_tx.clone())
   }
 
-  // std API that returns immediately, then calls callback later
-  pub fn connect_with_callback(
+  //     to_server_rx: ownership moves to the spawned thread, its job is to
+  //                  recv messages on this channel and send 'em to the server
+  //  from_server_tx: the thread also listens on the socket, reads messages
+  //                  and sends them on this channel
+  fn spawn_socket_process_loop(
     &mut self,
-    f: impl Fn(Message) -> () + Send + 'static,
-  ) -> Result<(), Box<dyn std::error::Error>> {
-    trace!(target: "rtmp:connect_with_callback", "url: {}", self.url);
-    let (from_server_tx, from_server_rx) = std::sync::mpsc::channel::<Message>();
-    // ownership will move to thread for processing messages
-    let to_server_rx_option = std::mem::replace(&mut self.to_server_rx, None);
-    let to_server_rx = to_server_rx_option.expect("to_server_rx should be defined");
-
+    to_server_rx: std::sync::mpsc::Receiver<Message>,
+    from_server_tx: std::sync::mpsc::Sender<Message>,
+  ) {
     let url = self.url.clone();
     let _cn_handle = self.runtime.spawn(async move {
       trace!(target: "rtmp:connect_with_callback", "spawn socket handler");
@@ -68,7 +66,13 @@ impl Connection {
         .await
         .expect("read until socket closes");
     });
+  }
 
+  pub fn spawn_message_receiver(
+    &mut self,
+    f: impl Fn(Message) -> () + Send + 'static,
+    from_server_rx: std::sync::mpsc::Receiver<Message>,
+  ) {
     let _res_handle = self.runtime.spawn(async move {
       trace!(target: "rtmp:connect_with_callback", "spawn recv handler");
       let mut num = 1; // just for debugging
@@ -87,12 +91,21 @@ impl Connection {
         num += 1;
       }
     });
+  }
 
-    // this blocks forever (or until socket closed)
-    // self.runtime.block_on(async move {
-    //   _cn_handle.await.expect("waiting for cn");
-    //   _res_handle.await.expect("waiting for res");
-    // });
+  // std API that returns immediately, then calls callback later
+  pub fn connect_with_callback(
+    &mut self,
+    f: impl Fn(Message) -> () + Send + 'static,
+  ) -> Result<(), Box<dyn std::error::Error>> {
+    trace!(target: "rtmp:connect_with_callback", "url: {}", self.url);
+    let (from_server_tx, from_server_rx) = std::sync::mpsc::channel::<Message>();
+    // ownership will move to thread for processing messages
+    let to_server_rx_option = std::mem::replace(&mut self.to_server_rx, None);
+    let to_server_rx = to_server_rx_option.expect("to_server_rx should be defined");
+
+    self.spawn_socket_process_loop(to_server_rx, from_server_tx);
+    self.spawn_message_receiver(f, from_server_rx);
 
     Ok(())
   }
