@@ -1,6 +1,6 @@
 mod flag;
 use crate::amf::Value;
-use crate::chunk::Message;
+use crate::Message;
 pub use flag::RecordFlag;
 use std::fmt;
 use std::sync::RwLock;

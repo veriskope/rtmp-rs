@@ -13,9 +13,7 @@ pub use signal::Signal; // export Signal as part of this module
 //use self::signal::Signal;
 //use crate::chunk::signal::Signal;
 
-mod message;
-pub use message::Message;
-pub use message::Status;
+use crate::message::Message;
 
 // the table of constants could be merged with Enum declaration with
 // https://github.com/rust-lang/rust/issues/60553

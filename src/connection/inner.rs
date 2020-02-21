@@ -7,7 +7,8 @@ use tokio::prelude::*;
 use tokio::{io::BufReader, net::TcpStream};
 
 use crate::amf::Value;
-use crate::chunk::{Chunk, Message, Signal};
+use crate::chunk::{Chunk, Signal};
+use crate::Message;
 
 use super::bufreadwriter::BufReadWriter;
 use super::handshake::{Handshake, HandshakeProcessResult, PeerType};
