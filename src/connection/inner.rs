@@ -1,4 +1,4 @@
-use log::{info, trace, warn};
+use log::{trace, warn};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use url::Url;
