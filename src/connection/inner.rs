@@ -19,7 +19,6 @@ pub struct InnerConnection {
   rx_to_server: std::sync::mpsc::Receiver<Message>,
   cn: BufReadWriter<BufReader<TcpStream>>,
   window_ack_size: u32,
-  next_cmd_id: AtomicUsize,
   is_connected: AtomicBool,
 }
 
@@ -42,17 +41,12 @@ impl InnerConnection {
       rx_to_server,
       cn: BufReadWriter::new(BufReader::new(tcp)),
       window_ack_size: 2500000,
-      next_cmd_id: AtomicUsize::new(1),
       is_connected: AtomicBool::new(false),
     }
   }
 
   fn is_connected(&self) -> bool {
     self.is_connected.load(Ordering::SeqCst)
-  }
-
-  fn get_next_cmd_id(&self) -> f64 {
-    self.next_cmd_id.fetch_add(1, Ordering::SeqCst) as f64
   }
 
   // async fn send_connect_command(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -69,7 +63,7 @@ impl InnerConnection {
 
     let msg = Message::Command {
       name: "connect".to_string(),
-      id: self.get_next_cmd_id(),
+      id: 1.0,
       data: Value::Object(properties),
       opt: Vec::new(),
     };
@@ -98,21 +92,6 @@ impl InnerConnection {
         let result = self.rx_to_server.try_recv();
         if let Ok(mut outgoing_msg) = result {
           // TODO: this shouldn't be synchronous
-          if let Message::Command {
-            name,
-            id: _,
-            data,
-            opt,
-          } = outgoing_msg
-          {
-            // make sure we have unique transaction ids
-            outgoing_msg = Message::Command {
-              name,
-              id: self.get_next_cmd_id(),
-              data,
-              opt,
-            };
-          };
           Chunk::write(&mut self.cn.buf, Chunk::Msg(outgoing_msg))
             .await
             .expect("chunk write message from queue");

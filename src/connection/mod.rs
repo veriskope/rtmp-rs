@@ -1,9 +1,9 @@
 use log::{info, trace, warn};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::Arc;
 use url::Url;
 
-use crate::stream::NetStream;
+use crate::stream::*;
 use crate::Message;
 use tokio::runtime::Runtime;
 
@@ -18,8 +18,7 @@ pub mod handshake;
 pub struct Connection {
   url: Url,
   runtime: Runtime,
-  // TODO: keep track of streams so we can clean them up?
-  next_stream_id: Arc<AtomicU32>,
+  next_cmd_id: AtomicUsize,
   to_server_tx: std::sync::mpsc::Sender<Message>, // messages destined for server go here
   to_server_rx: Option<std::sync::mpsc::Receiver<Message>>, // process loop grabs them from here
 }
@@ -34,18 +33,21 @@ impl Connection {
     Connection {
       url,
       runtime,
-      next_stream_id: Arc::new(AtomicU32::new(1)),
+      next_cmd_id: AtomicUsize::new(2),
       to_server_tx,
       to_server_rx: Some(to_server_rx), // consumed by process_loop
     }
   }
 
+  fn get_next_cmd_id(&self) -> f64 {
+    self.next_cmd_id.fetch_add(1, Ordering::SeqCst) as f64
+  }
+
   pub fn new_stream(&mut self) -> NetStream {
-    // stream id can be anything
-    // except 0 seems to be reserved for NetConnection
-    // so we just start at 1 and increment the id when we need new ones
-    let id = self.next_stream_id.fetch_add(1, Ordering::SeqCst);
-    NetStream::new(id, self.to_server_tx.clone())
+    // looks like stream id is created on the server
+    let cmd_id = self.get_next_cmd_id();
+    create_stream(cmd_id, self.to_server_tx.clone());
+    NetStream::Command(cmd_id)
   }
 
   //     to_server_rx: ownership moves to the spawned thread, its job is to
@@ -73,20 +75,37 @@ impl Connection {
     f: impl Fn(Message) -> () + Send + 'static,
     from_server_rx: std::sync::mpsc::Receiver<Message>,
   ) {
+    let to_server_tx = self.to_server_tx.clone();
     let _res_handle = self.runtime.spawn(async move {
-      trace!(target: "rtmp:connect_with_callback", "spawn recv handler");
+      trace!(target: "rtmp:message_receiver", "spawn recv handler");
       let mut num = 1; // just for debugging
       loop {
         let msg = from_server_rx.recv().expect("recv from server");
-        trace!(target: "rtmp:connect_with_callback", "#{}) recv from server {:?}", num, msg);
+        trace!(target: "rtmp:message_receiver", "#{}) recv from server {:?}", num, msg);
         if let Some(status) = msg.get_status() {
           let v: Vec<&str> = status.code.split('.').collect();
           match v[0] {
             "NetConnection" => f(msg),
-            _ => warn!(target: "rtmp:connect_with_callback", "unhandled status {:?}", status),
+            _ => warn!(target: "rtmp:message_receiver", "unhandled status {:?}", status),
           }
         } else {
-          warn!(target: "rtmp:connect_with_callback", "unhandled message from server {:?}", msg);
+          match msg {
+            Message::Response { id, data, opt } => {
+              if id == 2.0 {
+                // create stream
+                trace!(target: "rtmp:message_receiver", "publish");
+                publish(
+                  3.0,
+                  to_server_tx.clone(),
+                  "cameraFeed".to_string(),
+                  RecordFlag::Live,
+                );
+              }
+            }
+            _ => {
+              warn!(target: "rtmp:connect_with_callback", "unhandled message from server {:?}", msg)
+            }
+          }
         }
         num += 1;
       }

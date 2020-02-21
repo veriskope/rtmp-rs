@@ -17,8 +17,8 @@ fn main() {
   conn
     .connect_with_callback(move |response| {
       println!("===> connect response: {:?}", response);
-      stream.publish("mystream".to_string(), rtmp::RecordFlag::Live);
-      println!("===> published: {}", stream);
+      // stream.publish("mystream".to_string(), rtmp::RecordFlag::Live);
+      // println!("===> published: {}", stream);
     })
     .expect("rtmp connect");
   println!("waiting");
