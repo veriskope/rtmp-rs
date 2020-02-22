@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use url::Url;
 
 use tokio::prelude::*;
+use tokio::sync::mpsc;
 use tokio::{io::BufReader, net::TcpStream};
 
 use crate::amf::Value;
@@ -16,14 +17,14 @@ use super::handshake::{Handshake, HandshakeProcessResult, PeerType};
 // private connection owned by read/write thread
 pub struct InnerConnection {
     url: Url,
-    rx_to_server: std::sync::mpsc::Receiver<Message>,
+    rx_to_server: mpsc::Receiver<Message>,
     cn: BufReadWriter<BufReader<TcpStream>>,
     window_ack_size: u32,
     is_connected: AtomicBool,
 }
 
 impl InnerConnection {
-    pub async fn new(url: Url, rx_to_server: std::sync::mpsc::Receiver<Message>) -> Self {
+    pub async fn new(url: Url, rx_to_server: mpsc::Receiver<Message>) -> Self {
         let host = match url.host() {
             Some(h) => h,
             None => panic!("host required"),
@@ -73,65 +74,79 @@ impl InnerConnection {
             .expect("chunk write");
         Ok(())
     }
+
+    async fn handle_chunk(
+        &mut self,
+        chunk: Chunk,
+        mut tx: mpsc::Sender<Message>,
+    ) -> io::Result<()> {
+        trace!(target: "rtmp::Connection", "{:?}", chunk);
+        match chunk {
+            Chunk::Control(Signal::SetWindowAckSize(size)) => {
+                self.window_ack_size = size;
+                warn!(target: "rtmp::Connection", "SetWindowAckSize - saving variable, but functionality is unimplemented")
+            }
+            Chunk::Control(Signal::SetPeerBandwidth(size, _limit)) => {
+                self.window_ack_size = size;
+                warn!(target: "rtmp::Connection", "ignoring bandwidth limit request")
+            }
+            Chunk::Msg(m) => {
+                match m {
+                    // Command { name: String, id: u32, data: Value, opt: Value },
+                    Message::Response {
+                        id: _,
+                        data: _,
+                        opt: _,
+                    } => {
+                        trace!(target: "rtmp::Connection", "tx: {}", m);
+                        if let Some(status) = m.get_status() {
+                            if status.code == "NetConnection.Connect.Success" {
+                                trace!(target: "rtmp::Connection", "setting is_connected: {}", true);
+                                self.is_connected.fetch_or(true, Ordering::SeqCst);
+                            } // TODO: check for disconnect
+                        }
+                        tx.send(m)
+                            .await
+                            .expect("transfer message to trigger callback");
+                    }
+                    _ => warn!(target: "rtmp::Connection", "unhandled message: {:?}", m),
+                };
+            }
+            _ => warn!(target: "rtmp::Connection", "unhandled chunk: {:?}", chunk),
+        }
+        Ok(())
+    }
     // read messages from TCPStream
     // - handle protocol control messages
     // - send RTMP messages via tx
     // after connecting to server, then handle sending messages
     // - recv messages (via self.rx_to_server) and write as chunks
-    pub async fn process_message_loop(
-        &mut self,
-        tx: std::sync::mpsc::Sender<Message>,
-    ) -> io::Result<()> {
+    pub async fn process_message_loop(&mut self, tx: mpsc::Sender<Message>) -> io::Result<()> {
+        // This note totally belongs somewhere else now, just not sure where!
         // expected connect sequence
         // <---- Window Ack Size from server
         // <---- Set Peer Bandwidth from server
         // ----> Set Peer Bandwidth send to server
         loop {
             if self.is_connected() {
-                // if we've connected to the server, then check if we have a request to send a message to the server
-                let result = self.rx_to_server.try_recv();
-                if let Ok(outgoing_msg) = result {
-                    trace!(target: "rtmp::Connection", "outgoing message: {:?}", &outgoing_msg);
-                    // TODO: this shouldn't be synchronous
-                    Chunk::write(&mut self.cn.buf, Chunk::Msg(outgoing_msg))
-                        .await
-                        .expect("chunk write message from queue");
+                tokio::select! {
+                    Some(outgoing_msg) = self.rx_to_server.recv()  => {
+                      trace!(target: "rtmp::Connection", "outgoing message: {:?}", outgoing_msg);
+                      // TODO: this shouldn't be synchronous
+                      Chunk::write(&mut self.cn.buf, Chunk::Msg(outgoing_msg))
+                          .await
+                          .expect("chunk write message from queue");
+                    }
+                    Ok(response) = Chunk::read(&mut self.cn.buf) => {
+                        let (chunk, _num_bytes) = response;
+                        self.handle_chunk(chunk, tx.clone()).await.expect("handle chunk");
+                    }
                 }
-            }
-            // TODO: should not await this...
-            let (chunk, num_bytes) = Chunk::read(&mut self.cn.buf).await?;
-            trace!(target: "rtmp::Connection", "{:?}", chunk);
-            trace!(target: "rtmp::Connection", "parsed {} bytes", num_bytes);
-            match chunk {
-                Chunk::Control(Signal::SetWindowAckSize(size)) => {
-                    self.window_ack_size = size;
-                    warn!(target: "rtmp::Connection", "SetWindowAckSize - saving variable, but functionality is unimplemented")
-                }
-                Chunk::Control(Signal::SetPeerBandwidth(size, _limit)) => {
-                    self.window_ack_size = size;
-                    warn!(target: "rtmp::Connection", "ignoring bandwidth limit request")
-                }
-                Chunk::Msg(m) => {
-                    match m {
-                        // Command { name: String, id: u32, data: Value, opt: Value },
-                        Message::Response {
-                            id: _,
-                            data: _,
-                            opt: _,
-                        } => {
-                            trace!(target: "rtmp::Connection", "tx: {}", m);
-                            if let Some(status) = m.get_status() {
-                                if status.code == "NetConnection.Connect.Success" {
-                                    trace!(target: "rtmp::Connection", "setting is_connected: {}", true);
-                                    self.is_connected.fetch_or(true, Ordering::SeqCst);
-                                } // TODO: check for disconnect
-                            }
-                            tx.send(m).expect("transfer message to trigger callback");
-                        }
-                        _ => warn!(target: "rtmp::Connection", "unhandled message: {:?}", m),
-                    };
-                }
-                _ => warn!(target: "rtmp::Connection", "unhandled chunk: {:?}", chunk),
+            } else {
+                let (chunk, _num_bytes) = Chunk::read(&mut self.cn.buf).await?;
+                self.handle_chunk(chunk, tx.clone())
+                    .await
+                    .expect("handle chunk");
             }
         }
         // unreachable Ok(())

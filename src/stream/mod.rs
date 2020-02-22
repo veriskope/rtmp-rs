@@ -3,6 +3,7 @@ use crate::amf::Value;
 use crate::Message;
 pub use flag::RecordFlag;
 use log::trace;
+use tokio::sync::mpsc;
 
 pub enum NetStream {
     // idea for a state machine, not sure this is the right approach
@@ -16,7 +17,7 @@ pub enum NetStream {
 //     flag: RecordFlag,
 // }
 
-pub fn create_stream(cmd_id: f64, tx_to_server: std::sync::mpsc::Sender<Message>) {
+pub async fn create_stream(cmd_id: f64, mut tx_to_server: mpsc::Sender<Message>) {
     let msg = Message::Command {
         name: "createStream".to_string(),
         id: cmd_id,
@@ -25,12 +26,13 @@ pub fn create_stream(cmd_id: f64, tx_to_server: std::sync::mpsc::Sender<Message>
     };
     tx_to_server
         .send(msg)
+        .await
         .expect("queue 'createStream' message to server");
 }
 
-pub fn publish(
+pub async fn publish(
     stream_id: u32,
-    tx_to_server: std::sync::mpsc::Sender<Message>,
+    mut tx_to_server: mpsc::Sender<Message>,
     name: String,
     flag: RecordFlag,
 ) {
@@ -44,6 +46,7 @@ pub fn publish(
     trace!(target: "publish", "tx_to_server: {:?}", msg);
     tx_to_server
         .send(msg)
+        .await
         .expect("queue 'publish' message to server");
 }
 

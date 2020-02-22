@@ -1,5 +1,6 @@
 use log::{info, trace, warn};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use tokio::sync::mpsc;
 use url::Url;
 
 use crate::amf::Value;
@@ -15,12 +16,15 @@ use inner::InnerConnection;
 pub mod bufreadwriter;
 pub mod handshake;
 
+// TODO: maybe this should be configurable?
+const CHANNEL_SIZE: usize = 100;
+
 pub struct Connection {
     url: Url,
     runtime: Runtime,
     next_cmd_id: AtomicUsize,
-    to_server_tx: std::sync::mpsc::Sender<Message>, // messages destined for server go here
-    to_server_rx: Option<std::sync::mpsc::Receiver<Message>>, // process loop grabs them from here
+    to_server_tx: mpsc::Sender<Message>, // messages destined for server go here
+    to_server_rx: Option<mpsc::Receiver<Message>>, // process loop grabs them from here
 }
 
 impl Connection {
@@ -28,7 +32,7 @@ impl Connection {
     pub fn new(url: Url) -> Self {
         info!(target: "rtmp::Connection", "new");
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let (to_server_tx, to_server_rx) = std::sync::mpsc::channel::<Message>();
+        let (to_server_tx, to_server_rx) = mpsc::channel::<Message>(CHANNEL_SIZE);
 
         Connection {
             url,
@@ -46,7 +50,10 @@ impl Connection {
     pub fn new_stream(&mut self) -> NetStream {
         // looks like stream id is created on the server
         let cmd_id = self.get_next_cmd_id();
-        create_stream(cmd_id, self.to_server_tx.clone());
+        let to_server_tx = self.to_server_tx.clone();
+        self.runtime.block_on( async move {
+          create_stream(cmd_id, to_server_tx ).await;
+        });
         NetStream::Command(cmd_id)
     }
 
@@ -56,8 +63,8 @@ impl Connection {
     //                  and sends them on this channel
     fn spawn_socket_process_loop(
         &mut self,
-        to_server_rx: std::sync::mpsc::Receiver<Message>,
-        from_server_tx: std::sync::mpsc::Sender<Message>,
+        to_server_rx: mpsc::Receiver<Message>,
+        from_server_tx: mpsc::Sender<Message>,
     ) {
         let url = self.url.clone();
         let _cn_handle = self.runtime.spawn(async move {
@@ -73,14 +80,14 @@ impl Connection {
     pub fn spawn_message_receiver(
         &mut self,
         f: impl Fn(Message) -> () + Send + 'static,
-        from_server_rx: std::sync::mpsc::Receiver<Message>,
+        mut from_server_rx: mpsc::Receiver<Message>,
     ) {
         let to_server_tx = self.to_server_tx.clone();
         let _res_handle = self.runtime.spawn(async move {
           trace!(target: "rtmp:message_receiver", "spawn recv handler");
-          let mut num = 1; // just for debugging
+          let mut num:i32 = 1; // just for debugging
           loop {
-            let msg = from_server_rx.recv().expect("recv from server");
+            let msg = from_server_rx.recv().await.expect("recv from server");
             trace!(target: "rtmp:message_receiver", "#{}) recv from server {:?}", num, msg);
             if let Some(status) = msg.get_status() {
               let v: Vec<&str> = status.code.split('.').collect();
@@ -100,7 +107,7 @@ impl Connection {
                       to_server_tx.clone(),
                       "cameraFeed".to_string(),
                       RecordFlag::Live,
-                    );
+                    ).await;
                   },
                   _ => {
                     warn!(target: "rtmp:message_receiver", "unexpected opt type {:?}", opt);
@@ -124,7 +131,7 @@ impl Connection {
         f: impl Fn(Message) -> () + Send + 'static,
     ) -> Result<(), Box<dyn std::error::Error>> {
         trace!(target: "rtmp:connect_with_callback", "url: {}", self.url);
-        let (from_server_tx, from_server_rx) = std::sync::mpsc::channel::<Message>();
+        let (from_server_tx, from_server_rx) = mpsc::channel::<Message>(CHANNEL_SIZE);
         // ownership will move to thread for processing messages
         let to_server_rx_option = std::mem::replace(&mut self.to_server_rx, None);
         let to_server_rx = to_server_rx_option.expect("to_server_rx should be defined");
