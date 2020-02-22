@@ -109,11 +109,20 @@ impl Chunk {
       Chunk::Msg(message) => {
         // need to serialze the message first to get its length
         let mut buf = Vec::new();
+
+        // set chunkstream ID based on message type
+        let cs_id: u8 = match &message {
+          Message::Command { .. } => 3,
+          Message::StreamCommand { .. } => 4,
+          _ => {
+            warn!("unexpected message type {:?}, using csid=3", message);
+            3
+          }
+        };
+
         Message::write(&mut buf, message)
           .await
           .expect("serialize message");
-        // chunkstream message header
-        let cs_id: u8 = 3;
         // TODO: handle diff chunk headers/msg types, just bootstrapping the process a bit
         // also the hack below handles lengths of just one byte
         let hex_str = format!(

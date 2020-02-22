@@ -14,6 +14,11 @@ pub enum Message {
     data: Value,
     opt: Vec<Value>,
   }, // rename this opt to params?
+  StreamCommand {
+    name: String,
+    stream_id: u32,
+    params: Vec<Value>,
+  },
   Response {
     id: f64,
     data: Value,
@@ -40,6 +45,15 @@ impl fmt::Display for Message {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self {
       Message::Command { name, id, .. } => write!(f, "Command '{}' #{}", name, id),
+      Message::StreamCommand {
+        name,
+        stream_id,
+        params,
+      } => write!(
+        f,
+        "Command '{}' stream ID:{:?} {:?} ...",
+        name, stream_id, params[0]
+      ),
       Message::Response { id, .. } => write!(f, "Response '_result' #{}", id),
       Message::Error { id, .. } => write!(f, "Response '_error' #{}", id),
       Message::Status { code, description } => {
@@ -219,17 +233,32 @@ impl Message {
       } => {
         Value::write(&mut writer, Value::Utf8(name))
           .await
-          .expect("write AMF command name");
+          .expect("write command name");
         Value::write(&mut writer, Value::Number(id.into()))
           .await
-          .expect("write AMF transaction id");
+          .expect("write transaction id");
         Value::write(&mut writer, data)
           .await
-          .expect("write AMF command data");
+          .expect("write command data");
         for val in opt {
           Value::write(&mut writer, val)
             .await
-            .expect("write AMF optional info");
+            .expect("write optional info");
+        }
+      }
+      Message::StreamCommand {
+        name,
+        stream_id: _,
+        params,
+      } => {
+        Value::write(&mut writer, Value::Utf8(name))
+          .await
+          .expect("write command name");
+        Value::write(&mut writer, Value::Null)
+          .await
+          .expect("write Null command object");
+        for val in params {
+          Value::write(&mut writer, val).await.expect("write params");
         }
       }
       _ => {

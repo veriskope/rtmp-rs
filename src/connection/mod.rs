@@ -95,7 +95,7 @@ impl Connection {
                 // create stream
                 trace!(target: "rtmp:message_receiver", "publish");
                 publish(
-                  3.0,
+                  1,
                   to_server_tx.clone(),
                   "cameraFeed".to_string(),
                   RecordFlag::Live,

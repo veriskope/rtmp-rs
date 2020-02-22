@@ -30,18 +30,17 @@ pub fn create_stream(cmd_id: f64, tx_to_server: std::sync::mpsc::Sender<Message>
 }
 
 pub fn publish(
-  cmd_id: f64,
+  stream_id: u32,
   tx_to_server: std::sync::mpsc::Sender<Message>,
   name: String,
   flag: RecordFlag,
 ) {
   let params = vec![Value::Utf8(name.clone()), Value::Utf8(flag.to_string())];
 
-  let msg = Message::Command {
+  let msg = Message::StreamCommand {
     name: "publish".to_string(),
-    id: cmd_id,
-    data: Value::Null,
-    opt: params,
+    stream_id,
+    params,
   };
   trace!(target: "publish", "tx_to_server: {:?}", msg);
   tx_to_server
