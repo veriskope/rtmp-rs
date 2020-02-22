@@ -91,6 +91,7 @@ impl InnerConnection {
         // if we've connected to the server, then check if we have a request to send a message to the server
         let result = self.rx_to_server.try_recv();
         if let Ok(mut outgoing_msg) = result {
+          trace!(target: "rtmp::Connection", "outgoing message: {:?}", &outgoing_msg);
           // TODO: this shouldn't be synchronous
           Chunk::write(&mut self.cn.buf, Chunk::Msg(outgoing_msg))
             .await
@@ -120,6 +121,7 @@ impl InnerConnection {
               trace!(target: "rtmp::Connection", "tx: {}", m);
               if let Some(status) = m.get_status() {
                 if status.code == "NetConnection.Connect.Success" {
+                  trace!(target: "rtmp::Connection", "setting is_connected: {}", true);
                   self.is_connected.fetch_or(true, Ordering::SeqCst);
                 } // TODO: check for disconnect
               }
