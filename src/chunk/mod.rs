@@ -67,14 +67,16 @@ impl Chunk {
     reader.read_exact(&mut buf).await?;
 
     let ts = [0x00, buf[0], buf[1], buf[2]];
-    let _timestamp: u32 = u32::from_be_bytes(ts); // TODO: impl streams
+    let _timestamp: u32 = u32::from_be_bytes(ts);
 
     let length: u32 = u32::from_be_bytes([0x00, buf[3], buf[4], buf[5]]);
 
     let type_byte = reader.read_u8().await?;
     info!(target: "chunk::read", "message type: {}", type_byte);
 
-    let message_stream_id = reader.read_u32().await?; // TODO: impl streams
+    let mut buf: [u8; 4] = [0_u8; 4];
+    reader.read_exact(&mut buf).await?;
+    let message_stream_id = u32::from_le_bytes(buf);
     info!(target: "chunk::read", "message stream id: {}", message_stream_id);
 
     // buffer for message payload
