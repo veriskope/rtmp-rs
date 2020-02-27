@@ -254,10 +254,15 @@ impl Message {
         Value::write(&mut writer, Value::Utf8(name))
           .await
           .expect("write command name");
+        Value::write(&mut writer, Value::Number(0.0))
+          .await
+          .expect("write 0.0 transaction id");
+
         Value::write(&mut writer, Value::Null)
           .await
           .expect("write Null command object");
         for val in params {
+          trace!(target: "message::write", "=====> val: {:?}", val);
           Value::write(&mut writer, val).await.expect("write params");
         }
       }

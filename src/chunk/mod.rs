@@ -58,12 +58,12 @@ impl Chunk {
     if fmt != 0 {
       warn!(target: "chunk", "Chunk Type {} unimplemented", fmt)
     };
-    let header_size: u32 = 12; // TODO: variable size chunkheader
+    let header_size: u32 = 12; // TODO: variable size chunk header
 
     let csid = first_byte & 0x3f;
     info!(target: "chunk", "csid: {}", csid);
 
-    let mut buf: [u8; 6] = [0; 6]; // TODO: variable size chunkheader
+    let mut buf: [u8; 6] = [0; 6]; // TODO: variable size chunk header
     reader.read_exact(&mut buf).await?;
 
     let ts = [0x00, buf[0], buf[1], buf[2]];
@@ -94,11 +94,17 @@ impl Chunk {
     let chunk: Chunk = match type_byte {
       1..=6 => Chunk::Control(Signal::read(&mut chunk_reader, type_byte).await?),
       20 => Chunk::Msg(Message::read(&mut chunk_reader, type_byte, length).await?),
-      8..=22 => panic!("umimplemented RTMP message type: {}", type_byte), // TODO: fail at some of these
+      8..=22 => panic!("unimplemented RTMP message type: {}", type_byte), // TODO: fail at some of these
       _ => panic!("unexpected chunk type: {}", type_byte),
     };
     Ok((chunk, header_size + length))
   }
+
+  // 04 00 00 00 00 00 28 14  01 00 00 00               ......(.....
+  //
+  // 02 00 07 70 75 62 6c 69  73 68 00 40 10 00 00 00   ...publish.@....
+  // 00 00 00 05 02 00 0a 63  61 6d 65 72 61 46 65 65   .......cameraFee
+  // 64 02 00 04 4c 49 56 45                            d...LIVE
 
   pub async fn write<T>(mut writer: T, chunk: Chunk) -> io::Result<u32>
   where
@@ -107,13 +113,21 @@ impl Chunk {
     let _bytes_written: u32 = 0;
     match chunk {
       Chunk::Msg(message) => {
-        // need to serialze the message first to get its length
+        // need to serialize the message first to get its length
         let mut buf = Vec::new();
+        let mut stream_id: u32 = 0;
 
         // set chunkstream ID based on message type
         let cs_id: u8 = match &message {
           Message::Command { .. } => 3,
-          Message::StreamCommand { .. } => 4,
+          Message::StreamCommand {
+            name: _,
+            stream_id: id,
+            params: _,
+          } => {
+            stream_id = *id;
+            4
+          }
           _ => {
             warn!("unexpected message type {:?}, using csid=3", message);
             3
@@ -126,9 +140,10 @@ impl Chunk {
         // TODO: handle diff chunk headers/msg types, just bootstrapping the process a bit
         // also the hack below handles lengths of just one byte
         let hex_str = format!(
-          "{:02x} 00 00 00 00 00 {:02x} 14  00 00 00 00",
+          "{:02x} 00 00 00 00 00 {:02x} 14  {:02x} 00 00 00",
           cs_id,
-          buf.len()
+          buf.len(),
+          stream_id
         );
         let chunk_header = util::bytes_from_hex_string(&hex_str);
         writer
