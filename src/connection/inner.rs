@@ -20,6 +20,7 @@ pub struct InnerConnection {
   rx_to_server: mpsc::Receiver<Message>,
   cn: BufReadWriter<BufReader<TcpStream>>,
   window_ack_size: u32,
+  chunk_size: u32,
   is_connected: AtomicBool,
 }
 
@@ -42,6 +43,7 @@ impl InnerConnection {
       rx_to_server,
       cn: BufReadWriter::new(BufReader::new(tcp)),
       window_ack_size: 2500000,
+      chunk_size: 1024, // TODO: is this a good default?
       is_connected: AtomicBool::new(false),
     }
   }
@@ -81,12 +83,21 @@ impl InnerConnection {
     match chunk {
       Chunk::Control(Signal::SetWindowAckSize(size)) => {
         self.window_ack_size = size;
-        warn!(target: "rtmp::Connection", "SetWindowAckSize - saving variable, but functionality is unimplemented")
+        warn!(target: "rtmp::Connection",
+        "SetWindowAckSize - set window_ack_size {:?}", size)
       }
       Chunk::Control(Signal::SetPeerBandwidth(size, _limit)) => {
         self.window_ack_size = size;
-        warn!(target: "rtmp::Connection", "ignoring bandwidth limit request")
+        warn!(target: "rtmp::Connection", "SetPeerBandwidth - set window_ack_size {:?}", size)
       }
+      Chunk::Control(Signal::SetChunkSize(size)) => {
+        self.chunk_size = size;
+        warn!(target: "rtmp::Connection", "SetChunkSize - set chunk_size {:?}", size)
+      }
+      Chunk::Control(Signal::UserControlMessage(event_type)) => {
+        warn!(target: "rtmp::Connection", "UserControlMessage {:?} - unhandled", event_type)
+      }
+
       Chunk::Msg(m) => {
         match m {
           // Command { name: String, id: u32, data: Value, opt: Value },
