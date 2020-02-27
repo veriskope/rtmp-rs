@@ -1,7 +1,7 @@
-use crate::util;
+use crate::connection::bufreadwriter::BufReadWriter;
 use log::{info, trace, warn};
+use std::convert::TryInto;
 use tokio::prelude::*;
-
 // use rml_amf0::{Amf0Value};
 
 mod signal; // declare module
@@ -56,12 +56,12 @@ impl Chunk {
 
     let fmt = first_byte >> 6;
     if fmt != 0 {
-      warn!(target: "chunk", "Chunk Type {} unimplemented", fmt)
+      warn!(target: "chunk::read", "Chunk Type {} unimplemented", fmt)
     };
     let header_size: u32 = 12; // TODO: variable size chunk header
 
     let csid = first_byte & 0x3f;
-    info!(target: "chunk", "csid: {}", csid);
+    info!(target: "chunk::read", "csid: {}", csid);
 
     let mut buf: [u8; 6] = [0; 6]; // TODO: variable size chunk header
     reader.read_exact(&mut buf).await?;
@@ -72,10 +72,10 @@ impl Chunk {
     let length: u32 = u32::from_be_bytes([0x00, buf[3], buf[4], buf[5]]);
 
     let type_byte = reader.read_u8().await?;
-    info!(target: "chunk", "message type: {}", type_byte);
+    info!(target: "chunk::read", "message type: {}", type_byte);
 
     let message_stream_id = reader.read_u32().await?; // TODO: impl streams
-    info!(target: "chunk", "message stream id: {}", message_stream_id);
+    info!(target: "chunk::read", "message stream id: {}", message_stream_id);
 
     // buffer for message payload
     let mut message_buf: Vec<u8> = vec![0; length as usize];
@@ -85,10 +85,10 @@ impl Chunk {
       .await
       .expect("read chunk message payload");
     if bytes_read < length as usize {
-      warn!(target: "chunk", "bytes_read {} < length {}", bytes_read, length);
+      warn!(target: "chunk::read", "bytes_read {} < length {}", bytes_read, length);
       panic!("expected {} bytes got {} bytes", length, bytes_read);
     }
-    trace!(target: "chunk", "payload: {:02x?}", message_buf);
+    trace!(target: "chunk::read", "payload: {:02x?}", message_buf);
     let mut chunk_reader: &[u8] = &message_buf;
 
     let chunk: Chunk = match type_byte {
@@ -110,53 +110,82 @@ impl Chunk {
   where
     T: AsyncWrite + Unpin,
   {
+    trace!(target: "chunk::write", "{:?}", chunk);
     let _bytes_written: u32 = 0;
-    match chunk {
-      Chunk::Msg(message) => {
-        // need to serialize the message first to get its length
-        let mut buf = Vec::new();
-        let mut stream_id: u32 = 0;
+    let mut stream_id: u32 = 0;
+    let mut buf = Vec::new();
 
-        // set chunkstream ID based on message type
-        let cs_id: u8 = match &message {
-          Message::Command { .. } => 3,
+    // get header info from message
+    // set chunkstream ID based on message type
+    match chunk {
+      Chunk::Control(s) => panic!("unimplemented Chunk::Control {:?}", s),
+      Chunk::Msg(message) => {
+        let (cs_id, msg_type): (u8, u8) = match &message {
+          Message::Command { .. } => (3, 0x14),
           Message::StreamCommand {
             name: _,
             stream_id: id,
             params: _,
           } => {
             stream_id = *id;
-            4
+            (4, 0x14)
           }
           _ => {
             warn!("unexpected message type {:?}, using csid=3", message);
-            3
+            (3, 0x14)
           }
         };
-
+        // serialize the message into buffer to get its length
         Message::write(&mut buf, message)
           .await
           .expect("serialize message");
-        // TODO: handle diff chunk headers/msg types, just bootstrapping the process a bit
-        // also the hack below handles lengths of just one byte
-        let hex_str = format!(
-          "{:02x} 00 00 00 00 00 {:02x} 14  {:02x} 00 00 00",
-          cs_id,
-          buf.len(),
-          stream_id
-        );
-        let chunk_header = util::bytes_from_hex_string(&hex_str);
-        writer
-          .write(&chunk_header)
-          .await
-          .expect("write chunk header");
-        writer.write(&buf).await.expect("write message");
-      }
-      Chunk::Control(s) => panic!("unimplemented Chunk::Control {:?}", s),
-      // _ => {
-      //   panic!("unimplemented chunk type: {:?}", chunk)
-      // }
+        // TODO: handle diff chunk headers/msg types
+        // Type0 has 12 byte header (fmt/csid byte followed by 11 bytes)
+        // example:
+        //   04               Type 0, csid=4
+        //   00 00 00         timestamp ()
+        //   00 00 28         RTMP Message payload length: big endian / network
+        //   14               RTMP Message type
+        //   01 00 00 00      Message Stream ID: little endian
+        let mut header = BufReadWriter::new(Vec::new());
+        header.write_u8(cs_id).await.expect("write csid");
+        let timestamp: u32 = 0; // TODO: get timestamp from message
+        let timestamp_bytes = timestamp.to_be_bytes();
+        header.write_u8(timestamp_bytes[1]).await.expect("ts2");
+        header.write_u8(timestamp_bytes[2]).await.expect("ts1");
+        header.write_u8(timestamp_bytes[3]).await.expect("ts0");
+
+        let msg_len: u32 = buf.len().try_into().unwrap(); // TODO: check for 3
+        trace!(target: "chunk::write", "msg_len: {:?}", msg_len);
+        let len_bytes = msg_len.to_be_bytes();
+        header.write_u8(len_bytes[1]).await.expect("len2");
+        header.write_u8(len_bytes[2]).await.expect("len1");
+        header.write_u8(len_bytes[3]).await.expect("len0");
+
+        header.write_u8(msg_type).await.expect("write type");
+
+        let stream_id_bytes = stream_id.to_le_bytes();
+        header.write(&stream_id_bytes).await.expect("stream id");
+        // hack
+        // let hex_str = format!(
+        //   "{:02x} 00 00 00 00 00 {:02x} 14  {:02x} 00 00 00",
+        //   cs_id,
+        //   buf.len(),
+        //   stream_id
+        // );
+        // let chunk_header = util::bytes_from_hex_string(&hex_str);
+        // writer
+        //   .write(&chunk_header)
+        //   .await
+        //   .expect("write chunk header");
+        trace!(target: "chunk::write", "header: {:02x?}", &header.buf);
+        writer.write(&header).await.expect("write payload");
+
+        trace!(target: "chunk::write", "payload: {:02x?}", &buf);
+        writer.write(&buf).await.expect("write payload");
+      } // Chunk::Msg
     }; // match chunk
+
     Ok(_bytes_written)
   } // fn write
 } // impl Chunk

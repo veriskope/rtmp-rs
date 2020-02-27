@@ -11,12 +11,14 @@ fn main() {
   let url = Url::parse(&format!("rtmp://{}/live/mystream", addr)).expect("url parse");
 
   let mut conn = rtmp::Connection::new(url);
-  let stream = conn.new_stream();
+  //let stream =
+  conn.new_stream();
 
   // optional set timeout to 1 sec: conn.set_timeout(1000);
   conn
     .connect_with_callback(move |response| {
       println!("===> connect response: {:?}", response);
+      // TODO hack: publish called automatically on successful create
       // stream.publish("mystream".to_string(), rtmp::RecordFlag::Live);
       // println!("===> published: {}", stream);
     })
