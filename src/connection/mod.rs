@@ -114,9 +114,8 @@ impl Connection {
     f: impl Fn(Message) -> () + Send + 'static,
     mut from_server_rx: mpsc::Receiver<Message>,
   ) {
-    let to_server_tx = Some(self.to_server_tx.as_ref()).unwrap().clone();
     let mut runtime = self.runtime_guard.lock().unwrap();
-
+    let connection = self.clone();
     let stream_callback = self.stream_callback;
     let _res_handle = runtime.spawn(async move {
       trace!(target: "rtmp:message_receiver", "spawn recv handler");
@@ -135,6 +134,8 @@ impl Connection {
             Message::Response { id, .. } => {
               if id == 2.0 {
                 trace!(target: "rtmp:message_receiver", "about to call stream_callback");
+                let to_server_tx = Some(connection.to_server_tx.as_ref()).unwrap().clone();
+
                 stream_callback(msg);
                 // match opt {
                 //   Value::Number(stream_id) => {
