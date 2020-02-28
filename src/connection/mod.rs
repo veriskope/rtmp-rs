@@ -1,7 +1,6 @@
 use log::{info, trace, warn};
-use std::sync::{Arc, Mutex};
-
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 use url::Url;
@@ -21,10 +20,11 @@ pub mod handshake;
 // TODO: maybe this should be configurable?
 const CHANNEL_SIZE: usize = 100;
 
+#[derive(Clone)]
 pub struct Connection {
     url: Url,
     runtime_guard: Arc<Mutex<Runtime>>,
-    next_cmd_id: AtomicUsize,
+    next_cmd_id: Arc<AtomicUsize>,
     to_server_tx: mpsc::Sender<Message>, // messages destined for server go here
     to_server_rx: Option<mpsc::Receiver<Message>>, // process loop grabs them from here
     stream_callback: fn(Message) -> (),
@@ -65,7 +65,7 @@ impl Connection {
         Connection {
             url,
             runtime_guard: Arc::new(Mutex::new(runtime)),
-            next_cmd_id: AtomicUsize::new(2),
+            next_cmd_id: Arc::new(AtomicUsize::new(2)),
             to_server_tx,
             to_server_rx: Some(to_server_rx), // consumed by process_loop
             stream_callback,
