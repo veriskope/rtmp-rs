@@ -117,6 +117,7 @@ impl Connection {
         let to_server_tx = self.to_server_tx.clone();
         let mut runtime = self.runtime_guard.lock().unwrap();
 
+        let stream_callback = self.stream_callback;
         let _res_handle = runtime.spawn(async move {
       trace!(target: "rtmp:message_receiver", "spawn recv handler");
       let mut num: i32 = 1; // just for debugging
@@ -131,24 +132,27 @@ impl Connection {
           }
         } else {
           match msg {
-            Message::Response { id, data: _, opt } => {
+            Message::Response {id, .. } => {
+
               if id == 2.0 {
-                match opt {
-                  Value::Number(stream_id) => {
-                    // create stream
-                    trace!(target: "rtmp:message_receiver", "publish");
-                    publish(
-                      stream_id as u32,
-                      to_server_tx.clone(),
-                      "cameraFeed".to_string(),
-                      RecordFlag::Live,
-                    )
-                    .await;
-                  }
-                  _ => {
-                    warn!(target: "rtmp:message_receiver", "unexpected opt type {:?}", opt);
-                  }
-                } // match opt
+                trace!(target: "rtmp:message_receiver", "about to call stream_callback");
+                stream_callback(msg);
+                // match opt {
+                //   Value::Number(stream_id) => {
+                //     // create stream
+                //     trace!(target: "rtmp:message_receiver", "publish");
+                //     publish(
+                //       stream_id as u32,
+                //       to_server_tx.clone(),
+                //       "cameraFeed".to_string(),
+                //       RecordFlag::Live,
+                //     )
+                //     .await;
+                //   }
+                //   _ => {
+                //     warn!(target: "rtmp:message_receiver", "unexpected opt type {:?}", opt);
+                //   }
+                // } // match opt
               } // id == 2.0
             }
             _ => {

@@ -4,7 +4,7 @@ use std::time::Duration;
 use url::Url;
 
 fn stream_callback(msg: rtmp::Message) {
-    print!("stream_callback: {:?}", msg);
+    println!("===================> stream_callback: {:?}", msg);
 }
 
 fn main() {
