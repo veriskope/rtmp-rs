@@ -26,7 +26,7 @@ pub struct Connection {
   runtime_guard: Arc<Mutex<Runtime>>,
   next_cmd_id: Arc<AtomicUsize>,
   to_server_tx: Option<mpsc::Sender<Message>>, // messages destined server go here
-  stream_callback: fn(Message) -> (),
+  stream_callback: fn(Connection, Message) -> (),
 }
 
 // how to support closure as well as functions?
@@ -47,12 +47,12 @@ pub struct Connection {
 //    |                                                                     ^^^^ doesn't have a size known at compile-time
 //    |
 
-fn default_stream_callback(msg: Message) {
+fn default_stream_callback(conn: Connection, msg: Message) {
   println!("default stream callback for {:?}", msg);
 }
 impl Connection {
   // todo: new_with_transport, then new can defer creation of connection
-  pub fn new(url: Url, maybe_stream_callback: Option<fn(Message) -> ()>) -> Self {
+  pub fn new(url: Url, maybe_stream_callback: Option<fn(Connection, Message) -> ()>) -> Self {
     info!(target: "rtmp::Connection", "new");
     let stream_callback = match maybe_stream_callback {
       Some(cb) => cb,
@@ -134,9 +134,9 @@ impl Connection {
             Message::Response { id, .. } => {
               if id == 2.0 {
                 trace!(target: "rtmp:message_receiver", "about to call stream_callback");
-                let to_server_tx = Some(connection.to_server_tx.as_ref()).unwrap().clone();
+                // let to_server_tx = Some(connection.to_server_tx.as_ref()).unwrap().clone();
 
-                stream_callback(msg);
+                stream_callback(connection.clone(), msg);
                 // match opt {
                 //   Value::Number(stream_id) => {
                 //     // create stream
