@@ -19,7 +19,7 @@ fn main() {
 
   // optional set timeout to 1 sec: conn.set_timeout(1000);
   conn
-    .connect_with_callback(move |response| {
+    .connect_with_callback(move |cn, response| {
       println!("===> connect response: {:?}", response);
       // TODO hack: publish called automatically on successful create
       // stream.publish("mystream".to_string(), rtmp::RecordFlag::Live);

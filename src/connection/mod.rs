@@ -111,7 +111,7 @@ impl Connection {
 
   pub fn spawn_message_receiver(
     &mut self,
-    f: impl Fn(Message) -> () + Send + 'static,
+    f: impl Fn(Connection, Message) -> () + Send + 'static,
     mut from_server_rx: mpsc::Receiver<Message>,
   ) {
     let mut runtime = self.runtime_guard.lock().unwrap();
@@ -126,7 +126,7 @@ impl Connection {
         if let Some(status) = msg.get_status() {
           let v: Vec<&str> = status.code.split('.').collect();
           match v[0] {
-            "NetConnection" => f(msg),
+            "NetConnection" => f(connection.clone(), msg),
             _ => warn!(target: "rtmp:message_receiver", "unhandled status {:?}", status),
           }
         } else {
@@ -168,7 +168,7 @@ impl Connection {
   // std API that returns immediately, then calls callback later
   pub fn connect_with_callback(
     &mut self,
-    f: impl Fn(Message) -> () + Send + 'static,
+    f: impl Fn(Connection, Message) -> () + Send + 'static,
   ) -> Result<(), Box<dyn std::error::Error>> {
     trace!(target: "rtmp:connect_with_callback", "url: {}", self.url);
     let (from_server_tx, from_server_rx) = mpsc::channel::<Message>(CHANNEL_SIZE);
