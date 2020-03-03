@@ -21,11 +21,13 @@ fn main() {
     //let stream = conn.new_stream();
 
     // optional set timeout to 1 sec: conn.set_timeout(1000);
-    conn.connect_with_callback(move |_, response| {
+    conn.connect_with_callback(move |mut cn, response| {
         println!("===> connect response: {:?}", response);
+        let stream = cn.new_stream();
+        println!("===> created stream: {:?}", stream);
         // TODO hack: publish called automatically on successful create
         // stream.publish("mystream".to_string(), rtmp::RecordFlag::Live);
-        // println!("===> published: {}", stream);
+        // println!("===> published: {:?}", stream);
     })
     .expect("rtmp connect");
     println!("waiting");

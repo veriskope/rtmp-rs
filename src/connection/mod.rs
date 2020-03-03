@@ -75,24 +75,26 @@ impl Connection {
         self.next_cmd_id.fetch_add(1, Ordering::SeqCst) as f64
     }
 
-    pub async fn new_stream(&mut self) -> NetStream {
+    pub fn new_stream(&mut self) -> NetStream {
         // looks like stream id is created on the server
         let cmd_id = self.get_next_cmd_id();
         let mut to_server_tx = match &self.to_server_tx {
             Some(tx) => tx.clone(),
             None => panic!("need to be connected"),
         };
-
-        let msg = Message::Command {
-            name: "createStream".to_string(),
-            id: cmd_id,
-            data: Value::Null,
-            opt: Vec::new(),
-        };
-        to_server_tx
-            .send(msg)
-            .await
-            .expect("queue 'createStream' message to server");
+        let runtime = self.runtime_guard.lock().unwrap();
+        runtime.spawn(async move {
+            let msg = Message::Command {
+                name: "createStream".to_string(),
+                id: cmd_id,
+                data: Value::Null,
+                opt: Vec::new(),
+            };
+            to_server_tx
+                .send(msg)
+                .await
+                .expect("queue 'createStream' message to server");
+        });
 
         let new_stream = NetStream::Command(cmd_id);
         let mut stream_ref = self.stream.write().unwrap();
@@ -148,13 +150,13 @@ impl Connection {
                         if id == 2.0 {
                             trace!(target: "rtmp:message_receiver", "about to call stream_callback");
                             // let to_server_tx = Some(connection.to_server_tx.as_ref()).unwrap().clone();
-                            // let mut stream_ref = self.stream.write().unwrap();
-                            // let new_stream = NetStream::Created(id as u32);
+                            let mut stream_ref = connection.stream.write().unwrap();
+                            let new_stream = NetStream::Created(id as u32);
 
-                            // *stream_ref = new_stream;
+                            *stream_ref = new_stream;
 
-                            //stream_callback(new_stream.clone(), msg);
-                            stream_callback(NetStream::Uninitialized, msg);
+                            stream_callback(new_stream.clone(), msg);
+                            // stream_callback(NetStream::Uninitialized, msg);
                             // match opt {
                             //   Value::Number(stream_id) => {
                             //     // create stream

@@ -1,9 +1,9 @@
 mod flag;
-use crate::amf::Value;
-use crate::Message;
+// use crate::amf::Value;
+// use crate::Message;
 pub use flag::RecordFlag;
 // use log::trace;
-use tokio::sync::mpsc;
+// use tokio::sync::mpsc;
 
 #[derive(Copy, Clone, Debug)]
 pub enum NetStream {
@@ -18,19 +18,6 @@ pub enum NetStream {
 //     name: String,
 //     flag: RecordFlag,
 // }
-
-pub async fn create_stream(cmd_id: f64, mut tx_to_server: mpsc::Sender<Message>) {
-    let msg = Message::Command {
-        name: "createStream".to_string(),
-        id: cmd_id,
-        data: Value::Null,
-        opt: Vec::new(),
-    };
-    tx_to_server
-        .send(msg)
-        .await
-        .expect("queue 'createStream' message to server");
-}
 
 // pub async fn publish(
 //   stream_id: u32,
