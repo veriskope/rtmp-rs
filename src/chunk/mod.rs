@@ -13,7 +13,7 @@ pub use signal::Signal; // export Signal as part of this module
 //use self::signal::Signal;
 //use crate::chunk::signal::Signal;
 
-use crate::message::Message;
+use crate::message::*;
 
 // the table of constants could be merged with Enum declaration with
 // https://github.com/rust-lang/rust/issues/60553
@@ -95,7 +95,10 @@ impl Chunk {
 
         let chunk: Chunk = match type_byte {
             1..=6 => Chunk::Control(Signal::read(&mut chunk_reader, type_byte).await?),
-            20 => Chunk::Msg(Message::read(&mut chunk_reader, type_byte, length).await?),
+            20 => Chunk::Msg(Message {
+                stream_id: message_stream_id,
+                data: Message::read(&mut chunk_reader, type_byte, length).await?,
+            }),
             8..=22 => panic!("unimplemented RTMP message type: {}", type_byte), // TODO: fail at some of these
             _ => panic!("unexpected chunk type: {}", type_byte),
         };
@@ -114,7 +117,6 @@ impl Chunk {
     {
         trace!(target: "chunk::write", "{:?}", chunk);
         let _bytes_written: u32 = 0;
-        let mut stream_id: u32 = 0;
         let mut buf = Vec::new();
 
         // get header info from message
@@ -122,21 +124,17 @@ impl Chunk {
         match chunk {
             Chunk::Control(s) => panic!("unimplemented Chunk::Control {:?}", s),
             Chunk::Msg(message) => {
-                let (cs_id, msg_type): (u8, u8) = match &message {
-                    Message::Command { .. } => (3, 0x14),
-                    Message::StreamCommand {
-                        name: _,
-                        stream_id: id,
-                        params: _,
-                    } => {
-                        stream_id = *id;
-                        (4, 0x14)
-                    }
+                let (mut cs_id, msg_type): (u8, u8) = match &message.data {
+                    MessageData::Command(..) => (3, 0x14),
                     _ => {
                         warn!("unexpected message type {:?}, using csid=3", message);
                         (3, 0x14)
                     }
                 };
+                let stream_id = message.stream_id;
+                if stream_id != 0 {
+                    cs_id = 4;
+                }
                 // serialize the message into buffer to get its length
                 Message::write(&mut buf, message)
                     .await
@@ -222,11 +220,14 @@ mod tests {
         let url = "rtmp://example.com/something".to_string();
         properties.insert("tcUrl".to_string(), Value::Utf8(url));
 
-        let cmd = Message::Command {
-            name: "connect".to_string(),
-            id: 1.0,
-            data: Value::Object(properties), // shouldn't this be an array?
-            opt: Vec::new(),
+        let cmd = Message {
+            stream_id: 0,
+            data: MessageData::Command(MessageCommand {
+                name: "connect".to_string(),
+                id: 1.0,
+                data: Value::Object(properties), // shouldn't this be an array?
+                opt: Vec::new(),
+            }),
         };
 
         let mut buf = Vec::new();

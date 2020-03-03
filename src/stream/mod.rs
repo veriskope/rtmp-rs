@@ -1,6 +1,6 @@
 mod flag;
 // use crate::amf::Value;
-// use crate::Message;
+use crate::message::*;
 use crate::Connection;
 pub use flag::RecordFlag;
 // use log::trace;
@@ -10,6 +10,24 @@ pub use flag::RecordFlag;
 pub enum NetStream {
     Created(Connection, u32),
     // PublishRequest(String, RecordFlag),
+}
+
+impl NetStream {
+    pub async fn publish(&mut self, name: &str, flag: RecordFlag) -> Result<(), MessageError> {
+        unimplemented!()
+        // let msg = self.send_command("createStream", Vec::new()).await?;
+        // match msg {
+        //     Message::Response {
+        //         opt: Value::Number(stream_id),
+        //         ..
+        //     } => Ok((NetStream::Created(self.clone(), stream_id as u32), msg)),
+        //     Message::Response { opt: _, .. } => Err(ErrorMessage::new_status(
+        //         "A.Bug",
+        //         "The server isn't following the spec!",
+        //     )),
+        //     _ => panic!("unimplemented!"),
+        // }
+    }
 }
 
 // pub struct NetStreamInfo {

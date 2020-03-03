@@ -4,12 +4,12 @@ use std::thread::sleep;
 use std::time::Duration;
 use url::Url;
 
-fn stream_callback(stream: Option<&rtmp::NetStream>, msg: rtmp::Message) {
-    println!(
-        "===================> stream_callback: {:#?} {:#?}",
-        stream, msg
-    );
-}
+// fn stream_callback(stream: Option<&rtmp::NetStream>, msg: rtmp::Message) {
+//     println!(
+//         "===================> stream_callback: {:#?} {:#?}",
+//         stream, msg
+//     );
+// }
 
 #[tokio::main]
 async fn main() {
@@ -29,9 +29,12 @@ async fn main() {
             //     Ok((stream, message)) => (Some(stream), message),
             //     Err(err_message) => (None, err_message.0),
             // };
-            if let Ok((stream, message)) = cn.new_stream().await {
-                stream_callback(Some(&stream), message);
-                stream.publish("cameraFeed", RecordFlag::Live).await;
+            if let Ok((mut stream, message)) = cn.new_stream().await {
+                // stream_callback(Some(&stream), message);
+                stream
+                    .publish("cameraFeed", RecordFlag::Live)
+                    .await
+                    .unwrap();
                 println!("===> created stream: {:?}", stream);
             }
 

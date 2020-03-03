@@ -23,14 +23,16 @@ pub mod handshake;
 // TODO: maybe this should be configurable?
 const CHANNEL_SIZE: usize = 100;
 
+type CommandsAwaitingResponse =
+    HashMap<u64, oneshot::Sender<Result<MessageResponse, MessageError>>>;
+
 #[derive(Clone, Debug)]
 pub struct Connection {
     url: Url,
     next_cmd_id: Arc<AtomicUsize>,
     to_server_tx: Option<mpsc::Sender<Message>>, // messages destined server go here
     // stream_callback: fn(NetStream, Message) -> (),
-    commands_awaiting_response:
-        Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Message, ErrorMessage>>>>>,
+    commands_awaiting_response: Arc<Mutex<CommandsAwaitingResponse>>,
 }
 
 // how to support closure as well as functions?
@@ -65,7 +67,7 @@ impl Connection {
     }
 
     fn get_next_cmd_id(&self) -> f64 {
-        // TODO: Handle rollover
+        // TODO: Handle rollover - look at wrapping_add
         self.next_cmd_id.fetch_add(1, Ordering::SeqCst) as f64
     }
 
@@ -73,19 +75,22 @@ impl Connection {
         &mut self,
         name: &str,
         params: Vec<Value>,
-    ) -> Result<Message, ErrorMessage> {
+    ) -> Result<MessageResponse, MessageError> {
         let cmd_id = self.get_next_cmd_id();
         let mut to_server_tx = match &self.to_server_tx {
             Some(tx) => tx.clone(),
             None => panic!("need to be connected"),
         };
 
-        let msg = Message::Command {
-            name: name.to_string(),
-            id: cmd_id,
-            data: Value::Null,
-            opt: params,
-        };
+        let msg = Message::new(
+            None,
+            MessageData::Command(MessageCommand {
+                name: name.to_string(),
+                id: cmd_id,
+                data: Value::Null,
+                opt: params,
+            }),
+        );
         to_server_tx.send(msg).await?;
 
         let (sender, receiver) = oneshot::channel();
@@ -99,18 +104,18 @@ impl Connection {
         }
         receiver.await?
     }
-    pub async fn new_stream(&mut self) -> Result<(NetStream, Message), ErrorMessage> {
+
+    pub async fn new_stream(&mut self) -> Result<(NetStream, MessageResponse), MessageError> {
         let msg = self.send_command("createStream", Vec::new()).await?;
         match msg {
-            Message::Response {
+            MessageResponse {
                 opt: Value::Number(stream_id),
                 ..
             } => Ok((NetStream::Created(self.clone(), stream_id as u32), msg)),
-            Message::Response { opt: _, .. } => Err(ErrorMessage::new_status(
+            MessageResponse { opt: _, .. } => Err(MessageError::new_status(
                 "A.Bug",
                 "The server isn't following the spec!",
             )),
-            _ => panic!("unimplemented!"),
         }
 
         // let msg = self.from_server_rx.filter(|msg| {
@@ -166,46 +171,25 @@ impl Connection {
                 trace!(target: "rtmp:message_receiver", "#{}) recv from server {:?}", num, msg);
 
                 if let Some(status) = msg.get_status() {
-                let v: Vec<&str> = status.code.split('.').collect();
-                match v[0] {
-                    "NetConnection" => f(connection.clone(), msg),
-                    _ => warn!(target: "rtmp:message_receiver", "unhandled status {:?}", status),
-                }
+                    let v: Vec<&str> = status.code.split('.').collect();
+                    match v[0] {
+                        "NetConnection" => f(connection.clone(), msg),
+                        _ => warn!(target: "rtmp:message_receiver", "unhandled status {:?}", status),
+                    }
                 } else {
                     match msg {
-                        Message::Response { id, .. } => {
-                        if let Some(sender) = connection.commands_awaiting_response.lock().await.remove(&(id as u64)) {
-                            if sender.send(Ok(msg)).is_err() {
-                                warn!("Receiver for cmd {} went away", id);
+                        Message { data: MessageData::Response(response), .. } => {
+                            let response_id = response.id;
+                            if let Some(sender) = connection.commands_awaiting_response.lock().await.remove(&(response_id as u64)) {
+                                if sender.send(Ok(response)).is_err() {
+                                    warn!("Receiver for cmd {} went away", response_id);
+                                }
+                            } else {
+                                warn!("Got a response to a command but we don't know what to do with it!");
                             }
-                        } else {
-                            warn!("Got a response to a command but we don't know what to do with it!");
-                        }
-                        if id == 2.0 {
-                            trace!(target: "rtmp:message_receiver", "id 2.0");
-                            // let to_server_tx = Some(connection.to_server_tx.as_ref()).unwrap().clone();
-
-
-                            // match opt {
-                            //   Value::Number(stream_id) => {
-                            //     // create stream
-                            //     trace!(target: "rtmp:message_receiver", "publish");
-                            //     publish(
-                            //       stream_id as u32,
-                            //       to_server_tx.clone(),
-                            //       "cameraFeed".to_string(),
-                            //       RecordFlag::Live,
-                            //     )
-                            //     .await;
-                            //   }
-                            //   _ => {
-                            //     warn!(target: "rtmp:message_receiver", "unexpected opt type {:?}", opt);
-                            //   }
-                            // } // match opt
-                        } // id == 2.0
                         }
                         _ => {
-                        warn!(target: "rtmp:connect_with_callback", "unhandled message from server {:?}", msg)
+                            warn!(target: "rtmp:connect_with_callback", "unhandled message from server {:?}", msg)
                         }
                     }
                 }

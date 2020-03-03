@@ -9,7 +9,7 @@ use tokio::{io::BufReader, net::TcpStream};
 
 use crate::amf::Value;
 use crate::chunk::{Chunk, Signal};
-use crate::Message;
+use crate::message::*;
 
 use super::bufreadwriter::BufReadWriter;
 use super::handshake::{Handshake, HandshakeProcessResult, PeerType};
@@ -65,12 +65,15 @@ impl InnerConnection {
         // properties.insert("objectEncoding".to_string(), Amf0Value::Number(0.0));
         properties.insert("tcUrl".to_string(), Value::Utf8(self.url.to_string()));
 
-        let msg = Message::Command {
-            name: "connect".to_string(),
-            id: 1.0,
-            data: Value::Object(properties),
-            opt: Vec::new(),
-        };
+        let msg = Message::new(
+            None,
+            MessageData::Command(MessageCommand {
+                name: "connect".to_string(),
+                id: 1.0,
+                data: Value::Object(properties),
+                opt: Vec::new(),
+            }),
+        );
 
         Chunk::write(&mut self.cn.buf, Chunk::Msg(msg))
             .await
@@ -105,10 +108,9 @@ impl InnerConnection {
             Chunk::Msg(m) => {
                 match m {
                     // Command { name: String, id: u32, data: Value, opt: Value },
-                    Message::Response {
-                        id: _,
-                        data: _,
-                        opt: _,
+                    Message {
+                        data: MessageData::Response(..),
+                        ..
                     } => {
                         trace!(target: "rtmp::Connection", "tx: {}", m);
                         if let Some(status) = m.get_status() {

@@ -4,53 +4,73 @@ extern crate proc_macro;
 use crate::amf::Value;
 use log::{info, trace, warn};
 use std::fmt;
-// TODO: can we just derive Read on these, given that we know type?
+
 #[derive(Debug, Clone, PartialEq)]
-pub enum Message {
-    //Placeholder,
-    Command {
-        name: String,
-        id: f64,
-        data: Value,
-        opt: Vec<Value>,
-    }, // rename this opt to params?
-    StreamCommand {
-        name: String,
-        stream_id: u32,
-        params: Vec<Value>,
-    },
-    Response {
-        id: f64,
-        data: Value,
-        opt: Value,
-    },
-    Error {
-        id: f64,
-        data: Value,
-        opt: Value,
-    },
-    Status {
-        code: String,
-        description: String,
-    },
+pub struct Message {
+    pub stream_id: u32,
+    pub data: MessageData,
+}
+
+impl Message {
+    pub fn new(stream_id: Option<u32>, data: MessageData) -> Self {
+        Self {
+            stream_id: stream_id.unwrap_or(0),
+            data,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MessageData {
+    // Video(MessageVideo),
+    Command(MessageCommand),
+    Response(MessageResponse),
+    Status(MessageStatus),
+    Error(MessageError),
+}
+
+// pub struct MessageVideo {
+//     bytes: Box<[u8]>
+//     timestamp: u32,
+// }
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MessageCommand {
+    pub name: String,
+    pub id: f64,
+    pub data: Value,
+    pub opt: Vec<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MessageResponse {
+    pub id: f64,
+    pub data: Value,
+    pub opt: Value,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MessageStatus {
+    pub code: String,
+    pub description: String,
 }
 
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::oneshot::error::RecvError;
 
-#[derive(Clone, Debug)]
-pub struct ErrorMessage(pub Message);
+#[derive(Clone, Debug, PartialEq)]
+pub struct MessageError(pub MessageStatus);
 
-impl ErrorMessage {
+impl MessageError {
     pub(crate) fn new_status(code: &str, description: &str) -> Self {
-        Self(Message::Status {
+        Self(MessageStatus {
             code: code.into(),
             description: description.into(),
         })
     }
 }
 
-impl<T> From<SendError<T>> for ErrorMessage {
+impl<T> From<SendError<T>> for MessageError {
     fn from(_: SendError<T>) -> Self {
         Self::new_status(
             "Something.Closed",
@@ -59,7 +79,7 @@ impl<T> From<SendError<T>> for ErrorMessage {
     }
 }
 
-impl From<RecvError> for ErrorMessage {
+impl From<RecvError> for MessageError {
     fn from(_: RecvError) -> Self {
         Self::new_status("A.Bug", "A command id was reused because of a bug")
     }
@@ -100,20 +120,15 @@ impl From<RecvError> for ErrorMessage {
 **/
 impl fmt::Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Message::Command { name, id, .. } => write!(f, "Command '{}' #{}", name, id),
-            Message::StreamCommand {
-                name,
-                stream_id,
-                params,
-            } => write!(
-                f,
-                "Command '{}' stream ID:{:?} {:?} ...",
-                name, stream_id, params[0]
-            ),
-            Message::Response { id, .. } => write!(f, "Response '_result' #{}", id),
-            Message::Error { id, .. } => write!(f, "Response '_error' #{}", id),
-            Message::Status { code, description } => {
+        match &self.data {
+            MessageData::Command(MessageCommand { name, id, .. }) => {
+                write!(f, "Command '{}' #{}", name, id)
+            }
+            MessageData::Response(MessageResponse { id, .. }) => {
+                write!(f, "Response '_result' #{}", id)
+            }
+            MessageData::Error(..) => write!(f, "Response '_error' #(oops unimplemented)"),
+            MessageData::Status(MessageStatus { code, description }) => {
                 write!(f, "Response 'onStatus' {}: {}", code, description)
             }
         }
@@ -175,22 +190,17 @@ impl Status<'_> {
 
 impl Message {
     pub fn get_status(&self) -> Option<Status> {
-        let mut status_option: Option<Status> = None;
-        if let Message::Response {
-            id: _,
-            data: _,
-            opt,
-        } = self
-        {
-            status_option = match opt {
+        if let MessageData::Response(response_data) = &self.data {
+            match &response_data.opt {
                 Value::Object(h) => Status::from_hash(h),
                 _ => None,
-            };
-        };
-        status_option
+            }
+        } else {
+            None
+        }
     }
 
-    async fn read_command<T>(mut reader: T) -> io::Result<Message>
+    async fn read_command<T>(mut reader: T) -> io::Result<MessageData>
     where
         T: AsyncRead + Unpin,
     {
@@ -209,12 +219,13 @@ impl Message {
                     "_result" => {
                         let opt = Value::read(&mut reader).await.expect("read optional data");
                         trace!(target: "message::read", "_result optional data = {:?}", opt);
-                        Message::Response { id, data, opt }
+                        MessageData::Response(MessageResponse { id, data, opt })
                     }
                     "_error" => {
-                        let opt = Value::read(&mut reader).await.expect("read optional data");
-                        trace!(target: "message::read", "_result optional data = {:?}", opt);
-                        Message::Error { id, data, opt }
+                        unimplemented!()
+                        // let opt = Value::read(&mut reader).await.expect("read optional data");
+                        // trace!(target: "message::read", "_result optional data = {:?}", opt);
+                        // MessageError { id, data, opt }
                     }
                     "onStatus" => {
                         let opt = Value::read(&mut reader).await.expect("read optional data");
@@ -222,10 +233,10 @@ impl Message {
                         if let Value::Object(h) = opt {
                             let result = Status::from_hash(&h);
                             if let Some(status) = result {
-                                Message::Status {
+                                MessageData::Status(MessageStatus {
                                     code: status.code.to_string(),
                                     description: status.description.to_string(),
-                                }
+                                })
                             } else {
                                 panic!("unexpected opt hash format {:?} in OnStatus id {}", h, id)
                             }
@@ -242,12 +253,12 @@ impl Message {
                             _ => vec![Value::read(&mut reader).await.expect("read optional data")],
                         };
                         trace!(target: "message::read", "command optional data = {:?}", opt);
-                        Message::Command {
+                        MessageData::Command(MessageCommand {
                             name,
                             id,
                             data,
                             opt,
-                        }
+                        })
                     }
                 };
                 return Ok(msg);
@@ -262,7 +273,7 @@ impl Message {
         }
     }
 
-    pub async fn read<T>(mut reader: T, chunk_type: u8, chunk_len: u32) -> io::Result<Message>
+    pub async fn read<T>(mut reader: T, chunk_type: u8, chunk_len: u32) -> io::Result<MessageData>
     where
         T: AsyncRead + Unpin,
     {
@@ -271,7 +282,7 @@ impl Message {
         // TODO: consider reading whole chunk?  or at least checking to see if we read correct amount?
 
         match chunk_type {
-            20 => Message::read_command(&mut reader).await, // Command message AMF0
+            20 => Self::read_command(&mut reader).await, // Command message AMF0
             _ => panic!("unimplemented read for message chunk type {}", chunk_type),
         } // match chunk_type
     } // pub async fn read
@@ -281,13 +292,13 @@ impl Message {
         T: AsyncWrite + Unpin,
     {
         info!(target: "message::write", "Message: {:?}", msg);
-        match msg {
-            Message::Command {
+        match msg.data {
+            MessageData::Command(MessageCommand {
                 name,
                 id,
                 data,
                 opt,
-            } => {
+            }) => {
                 Value::write(&mut writer, Value::Utf8(name))
                     .await
                     .expect("write command name");
@@ -301,26 +312,6 @@ impl Message {
                     Value::write(&mut writer, val)
                         .await
                         .expect("write optional info");
-                }
-            }
-            Message::StreamCommand {
-                name,
-                stream_id: _,
-                params,
-            } => {
-                Value::write(&mut writer, Value::Utf8(name))
-                    .await
-                    .expect("write command name");
-                Value::write(&mut writer, Value::Number(0.0))
-                    .await
-                    .expect("write 0.0 transaction id");
-
-                Value::write(&mut writer, Value::Null)
-                    .await
-                    .expect("write Null command object");
-                for val in params {
-                    trace!(target: "message::write", "=====> val: {:?}", val);
-                    Value::write(&mut writer, val).await.expect("write params");
                 }
             }
             _ => {
@@ -421,11 +412,11 @@ mod tests {
 
         assert_eq!(
             m,
-            Message::Response {
+            MessageData::Response(MessageResponse {
                 id: 1.0,
                 data: Value::Object(data_hash),
                 opt: Value::Utf8("X".to_string())
-            }
+            })
         );
     }
 
@@ -457,12 +448,12 @@ mod tests {
 
         assert_eq!(
             m,
-            Message::Command {
+            MessageData::Command(MessageCommand {
                 name: "onBWDone".to_string(),
                 id: 0.0,
                 data: Value::Null,
                 opt: Vec::new()
-            } // end Message::Command
+            }) // end Message::Command
         );
     }
 } // mod tests
