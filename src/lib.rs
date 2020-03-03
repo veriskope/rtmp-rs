@@ -1,3 +1,5 @@
+#![warn(missing_debug_implementations)]
+
 // used in amf.rs
 #[macro_use]
 extern crate enum_primitive_derive;

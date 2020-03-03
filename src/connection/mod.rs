@@ -20,7 +20,7 @@ pub mod handshake;
 // TODO: maybe this should be configurable?
 const CHANNEL_SIZE: usize = 100;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Connection {
   url: Url,
   runtime_guard: Arc<Mutex<Runtime>>,
