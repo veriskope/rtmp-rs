@@ -7,7 +7,7 @@ pub enum RecordFlag {
     Append,
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(Copy, PartialEq, Debug)]
 pub enum Error {
     RecordFlagParse,
 }

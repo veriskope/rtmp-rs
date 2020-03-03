@@ -7,10 +7,10 @@ use tokio::sync::mpsc;
 
 #[derive(Debug)]
 pub enum NetStream {
-  // idea for a state machine, not sure this is the right approach
-  Command(f64),
-  Created(f64),
-  // PublishRequest(String, RecordFlag),
+    // idea for a state machine, not sure this is the right approach
+    Command(f64),
+    Created(f64),
+    // PublishRequest(String, RecordFlag),
 }
 
 // pub struct NetStreamInfo {
@@ -19,16 +19,16 @@ pub enum NetStream {
 // }
 
 pub async fn create_stream(cmd_id: f64, mut tx_to_server: mpsc::Sender<Message>) {
-  let msg = Message::Command {
-    name: "createStream".to_string(),
-    id: cmd_id,
-    data: Value::Null,
-    opt: Vec::new(),
-  };
-  tx_to_server
-    .send(msg)
-    .await
-    .expect("queue 'createStream' message to server");
+    let msg = Message::Command {
+        name: "createStream".to_string(),
+        id: cmd_id,
+        data: Value::Null,
+        opt: Vec::new(),
+    };
+    tx_to_server
+        .send(msg)
+        .await
+        .expect("queue 'createStream' message to server");
 }
 
 // pub async fn publish(
