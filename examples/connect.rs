@@ -13,7 +13,7 @@ fn main() {
 
         let url = Url::parse(&format!("rtmp://{}/vod/media", addr)).expect("url parse");
 
-        let mut conn = rtmp::Connection::new(url, None);
+        let mut conn = rtmp::Connection::new(url);
         // optional set timeout to 1 sec: conn.set_timeout(1000);
         conn.connect_with_callback(|_, response| {
             println!("connect response: {:?}", response);

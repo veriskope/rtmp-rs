@@ -8,9 +8,6 @@ pub use flag::RecordFlag;
 
 #[derive(Clone, Debug)]
 pub enum NetStream {
-    // idea for a state machine, not sure this is the right approach
-    Uninitialized,
-    Command(f64),
     Created(Connection, u32),
     // PublishRequest(String, RecordFlag),
 }

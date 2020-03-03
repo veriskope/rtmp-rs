@@ -145,20 +145,17 @@ impl InnerConnection {
                     Some(outgoing_msg) = self.rx_to_server.recv()  => {
                       trace!(target: "rtmp::Connection", "outgoing message: {:?}", outgoing_msg);
                       // TODO: this shouldn't be synchronous
-                      Chunk::write(&mut self.cn.buf, Chunk::Msg(outgoing_msg))
-                          .await
-                          .expect("chunk write message from queue");
+                      Chunk::write(&mut self.cn.buf, Chunk::Msg(outgoing_msg)).await?;
                     }
                     Ok(response) = Chunk::read(&mut self.cn.buf) => {
+                        // TODO: need to distinguish not enough data from real errors
                         let (chunk, _num_bytes) = response;
-                        self.handle_chunk(chunk, tx.clone()).await.expect("handle chunk");
+                        self.handle_chunk(chunk, tx.clone()).await?;
                     }
                 }
             } else {
                 let (chunk, _num_bytes) = Chunk::read(&mut self.cn.buf).await?;
-                self.handle_chunk(chunk, tx.clone())
-                    .await
-                    .expect("handle chunk");
+                self.handle_chunk(chunk, tx.clone()).await?;
             }
         }
         // unreachable Ok(())

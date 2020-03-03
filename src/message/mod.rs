@@ -5,7 +5,7 @@ use crate::amf::Value;
 use log::{info, trace, warn};
 use std::fmt;
 // TODO: can we just derive Read on these, given that we know type?
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Message {
     //Placeholder,
     Command {
@@ -34,6 +34,63 @@ pub enum Message {
         description: String,
     },
 }
+
+use tokio::sync::mpsc::error::SendError;
+use tokio::sync::oneshot::error::RecvError;
+
+#[derive(Clone, Debug)]
+pub struct ErrorMessage(pub Message);
+
+impl ErrorMessage {
+    pub(crate) fn new_status(code: &str, description: &str) -> Self {
+        Self(Message::Status {
+            code: code.into(),
+            description: description.into(),
+        })
+    }
+}
+
+impl<T> From<SendError<T>> for ErrorMessage {
+    fn from(_: SendError<T>) -> Self {
+        Self::new_status(
+            "Something.Closed",
+            "The connection was previously closed due to an IO error or there's a bug",
+        )
+    }
+}
+
+impl From<RecvError> for ErrorMessage {
+    fn from(_: RecvError) -> Self {
+        Self::new_status("A.Bug", "A command id was reused because of a bug")
+    }
+}
+
+// enum StatusCode {
+//     Success,
+//     Failed,
+//     Rejected,
+//     Closed,
+//     Unrecognized(String),
+// }
+
+// impl FromStr for StatusCode {
+//     type Error = std::convert::Infallible;
+
+//     fn from_str(s: &str) -> Result<Self, Self::Error> {
+//         match s {
+
+//         }
+//     }
+// }
+
+// impl StatusCode {
+//     fn as_str(&self) -> &str {
+//         match *self {
+//             StatusCode::Success => "...",
+
+//         }
+//     }
+// }
 
 /**
 "NetConnection.Connect.Success"

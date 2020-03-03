@@ -1,13 +1,16 @@
 use log::{info, trace, warn};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use tokio::runtime::Handle;
 use tokio::sync::mpsc;
+use tokio::sync::oneshot;
+use tokio::sync::Mutex;
 use url::Url;
 
 use crate::amf::Value;
+use crate::message::*;
 use crate::stream::*;
-use crate::Message;
 
 mod inner;
 use inner::InnerConnection;
@@ -25,8 +28,9 @@ pub struct Connection {
     url: Url,
     next_cmd_id: Arc<AtomicUsize>,
     to_server_tx: Option<mpsc::Sender<Message>>, // messages destined server go here
-    stream_callback: fn(NetStream, Message) -> (),
-    stream: Arc<RwLock<NetStream>>, // just for now, should handle multiples
+    // stream_callback: fn(NetStream, Message) -> (),
+    commands_awaiting_response:
+        Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Message, ErrorMessage>>>>>,
 }
 
 // how to support closure as well as functions?
@@ -47,58 +51,83 @@ pub struct Connection {
 //    |                                                                     ^^^^ doesn't have a size known at compile-time
 //    |
 
-fn default_stream_callback(_stream: NetStream, msg: Message) {
-    println!("default stream callback for {:?}", msg);
-}
 impl Connection {
     // todo: new_with_transport, then new can defer creation of connection
-    pub fn new(url: Url, maybe_stream_callback: Option<fn(NetStream, Message) -> ()>) -> Self {
+    pub fn new(url: Url) -> Self {
         info!(target: "rtmp::Connection", "new");
-        let stream_callback = match maybe_stream_callback {
-            Some(cb) => cb,
-            None => default_stream_callback,
-        };
 
         Connection {
             url,
             next_cmd_id: Arc::new(AtomicUsize::new(2)),
             to_server_tx: None,
-            stream_callback,
-            stream: Arc::new(RwLock::new(NetStream::Uninitialized)),
+            commands_awaiting_response: Default::default(), //Arc::new(Mutex::new(HashMap::new()))
         }
     }
 
     fn get_next_cmd_id(&self) -> f64 {
+        // TODO: Handle rollover
         self.next_cmd_id.fetch_add(1, Ordering::SeqCst) as f64
     }
 
-    pub fn new_stream(&mut self) -> NetStream {
-        // looks like stream id is created on the server
+    pub async fn send_command(
+        &mut self,
+        name: &str,
+        params: Vec<Value>,
+    ) -> Result<Message, ErrorMessage> {
         let cmd_id = self.get_next_cmd_id();
         let mut to_server_tx = match &self.to_server_tx {
             Some(tx) => tx.clone(),
             None => panic!("need to be connected"),
         };
-        let runtime = Handle::current();
 
-        runtime.spawn(async move {
-            let msg = Message::Command {
-                name: "createStream".to_string(),
-                id: cmd_id,
-                data: Value::Null,
-                opt: Vec::new(),
-            };
-            to_server_tx
-                .send(msg)
-                .await
-                .expect("queue 'createStream' message to server");
-        });
+        let msg = Message::Command {
+            name: name.to_string(),
+            id: cmd_id,
+            data: Value::Null,
+            opt: params,
+        };
+        to_server_tx.send(msg).await?;
 
-        let new_stream = NetStream::Command(cmd_id);
-        let mut stream_ref = self.stream.write().unwrap();
+        let (sender, receiver) = oneshot::channel();
+        let existing_subscriber = self
+            .commands_awaiting_response
+            .lock()
+            .await
+            .insert(cmd_id as u64, sender);
+        if existing_subscriber.is_some() {
+            warn!("ignoring this unexpected thing");
+        }
+        receiver.await?
+    }
+    pub async fn new_stream(&mut self) -> Result<(NetStream, Message), ErrorMessage> {
+        let msg = self.send_command("createStream", Vec::new()).await?;
+        match msg {
+            Message::Response {
+                opt: Value::Number(stream_id),
+                ..
+            } => Ok((NetStream::Created(self.clone(), stream_id as u32), msg)),
+            Message::Response { opt: _, .. } => Err(ErrorMessage::new_status(
+                "A.Bug",
+                "The server isn't following the spec!",
+            )),
+            _ => panic!("unimplemented!"),
+        }
 
-        *stream_ref = new_stream.clone();
-        new_stream
+        // let msg = self.from_server_rx.filter(|msg| {
+        //     message_indicating_success => true,
+        //     message_indicating_failure => true,
+        //     _ => false,
+        // }).next().await;
+        // if let msg = message_indicating_success {
+        //     Ok(create_the_stream_from(msg))
+        // } else {
+        //     Err(msg)
+        // }
+
+        // let new_stream = NetStream::Command(cmd_id);
+        // let mut stream_ref = self.stream.write().unwrap();
+
+        // *stream_ref = new_stream.clone();
     }
 
     //     to_server_rx: ownership moves to the spawned thread, its job is to
@@ -129,13 +158,13 @@ impl Connection {
     ) {
         let runtime = Handle::current();
         let connection = self.clone();
-        let stream_callback = self.stream_callback;
         let _res_handle = runtime.spawn(async move {
             trace!(target: "rtmp:message_receiver", "spawn recv handler");
             let mut num: i32 = 1; // just for debugging
             loop {
                 let msg = from_server_rx.recv().await.expect("recv from server");
                 trace!(target: "rtmp:message_receiver", "#{}) recv from server {:?}", num, msg);
+
                 if let Some(status) = msg.get_status() {
                 let v: Vec<&str> = status.code.split('.').collect();
                 match v[0] {
@@ -145,15 +174,18 @@ impl Connection {
                 } else {
                     match msg {
                         Message::Response { id, .. } => {
+                        if let Some(sender) = connection.commands_awaiting_response.lock().await.remove(&(id as u64)) {
+                            if sender.send(Ok(msg)).is_err() {
+                                warn!("Receiver for cmd {} went away", id);
+                            }
+                        } else {
+                            warn!("Got a response to a command but we don't know what to do with it!");
+                        }
                         if id == 2.0 {
-                            trace!(target: "rtmp:message_receiver", "about to call stream_callback");
+                            trace!(target: "rtmp:message_receiver", "id 2.0");
                             // let to_server_tx = Some(connection.to_server_tx.as_ref()).unwrap().clone();
-                            let mut stream_ref = connection.stream.write().unwrap();
-                            let new_stream = NetStream::Created(connection.clone(), id as u32);
-                            *stream_ref = new_stream.clone();
 
-                            stream_callback(new_stream, msg);
-                            // stream_callback(NetStream::Uninitialized, msg);
+
                             // match opt {
                             //   Value::Number(stream_id) => {
                             //     // create stream
