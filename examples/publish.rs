@@ -10,7 +10,8 @@ fn stream_callback(stream: rtmp::NetStream, msg: rtmp::Message) {
     );
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     pretty_env_logger::init();
 
     let addr = "127.0.0.1:1935";
@@ -36,7 +37,4 @@ fn main() {
     loop {
         sleep(some_time);
     }
-    // let mut input = String::new();
-    // println!("press return to quit");
-    // std::io::stdin().read_line(&mut input).expect("stdio read_line");
 }

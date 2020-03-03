@@ -1,7 +1,7 @@
 use log::{info, trace, warn};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
-use tokio::runtime::Runtime;
+use std::sync::{Arc, RwLock};
+use tokio::runtime::Handle;
 use tokio::sync::mpsc;
 use url::Url;
 
@@ -23,7 +23,6 @@ const CHANNEL_SIZE: usize = 100;
 #[derive(Clone, Debug)]
 pub struct Connection {
     url: Url,
-    runtime_guard: Arc<Mutex<Runtime>>,
     next_cmd_id: Arc<AtomicUsize>,
     to_server_tx: Option<mpsc::Sender<Message>>, // messages destined server go here
     stream_callback: fn(NetStream, Message) -> (),
@@ -59,11 +58,9 @@ impl Connection {
             Some(cb) => cb,
             None => default_stream_callback,
         };
-        let runtime = tokio::runtime::Runtime::new().expect("new Runtime");
 
         Connection {
             url,
-            runtime_guard: Arc::new(Mutex::new(runtime)),
             next_cmd_id: Arc::new(AtomicUsize::new(2)),
             to_server_tx: None,
             stream_callback,
@@ -82,7 +79,8 @@ impl Connection {
             Some(tx) => tx.clone(),
             None => panic!("need to be connected"),
         };
-        let runtime = self.runtime_guard.lock().unwrap();
+        let runtime = Handle::current();
+
         runtime.spawn(async move {
             let msg = Message::Command {
                 name: "createStream".to_string(),
@@ -113,7 +111,7 @@ impl Connection {
         from_server_tx: mpsc::Sender<Message>,
     ) {
         let url = self.url.clone();
-        let runtime = self.runtime_guard.lock().unwrap();
+        let runtime = Handle::current();
         let _cn_handle = runtime.spawn(async move {
             trace!(target: "rtmp:connect_with_callback", "spawn socket handler");
             let mut cn = InnerConnection::new(url, to_server_rx).await;
@@ -129,7 +127,7 @@ impl Connection {
         f: impl Fn(Connection, Message) -> () + Send + 'static,
         mut from_server_rx: mpsc::Receiver<Message>,
     ) {
-        let runtime = self.runtime_guard.lock().unwrap();
+        let runtime = Handle::current();
         let connection = self.clone();
         let stream_callback = self.stream_callback;
         let _res_handle = runtime.spawn(async move {
