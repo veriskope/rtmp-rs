@@ -1,13 +1,13 @@
 use std::fmt;
 use std::str::FromStr;
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum RecordFlag {
     Live,
     Record,
     Append,
 }
 
-#[derive(Copy, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum Error {
     RecordFlagParse,
 }
