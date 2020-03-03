@@ -3,8 +3,11 @@ use std::thread::sleep;
 use std::time::Duration;
 use url::Url;
 
-fn stream_callback(_conn: rtmp::Connection, msg: rtmp::Message) {
-    println!("===================> stream_callback: {:?}", msg);
+fn stream_callback(stream: rtmp::NetStream, msg: rtmp::Message) {
+    println!(
+        "===================> stream_callback: {:?} {:?}",
+        stream, msg
+    );
 }
 
 fn main() {

@@ -8,8 +8,9 @@ use tokio::sync::mpsc;
 #[derive(Copy, Clone, Debug)]
 pub enum NetStream {
     // idea for a state machine, not sure this is the right approach
+    Uninitialized,
     Command(f64),
-    Created(f64),
+    Created(u32),
     // PublishRequest(String, RecordFlag),
 }
 

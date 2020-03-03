@@ -1,11 +1,11 @@
 use log::{info, trace, warn};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 use url::Url;
 
-// use crate::amf::Value;
+use crate::amf::Value;
 use crate::stream::*;
 use crate::Message;
 
@@ -26,7 +26,8 @@ pub struct Connection {
     runtime_guard: Arc<Mutex<Runtime>>,
     next_cmd_id: Arc<AtomicUsize>,
     to_server_tx: Option<mpsc::Sender<Message>>, // messages destined server go here
-    stream_callback: fn(Connection, Message) -> (),
+    stream_callback: fn(NetStream, Message) -> (),
+    stream: Arc<RwLock<NetStream>>, // just for now, should handle multiples
 }
 
 // how to support closure as well as functions?
@@ -47,12 +48,12 @@ pub struct Connection {
 //    |                                                                     ^^^^ doesn't have a size known at compile-time
 //    |
 
-fn default_stream_callback(_conn: Connection, msg: Message) {
+fn default_stream_callback(_stream: NetStream, msg: Message) {
     println!("default stream callback for {:?}", msg);
 }
 impl Connection {
     // todo: new_with_transport, then new can defer creation of connection
-    pub fn new(url: Url, maybe_stream_callback: Option<fn(Connection, Message) -> ()>) -> Self {
+    pub fn new(url: Url, maybe_stream_callback: Option<fn(NetStream, Message) -> ()>) -> Self {
         info!(target: "rtmp::Connection", "new");
         let stream_callback = match maybe_stream_callback {
             Some(cb) => cb,
@@ -66,6 +67,7 @@ impl Connection {
             next_cmd_id: Arc::new(AtomicUsize::new(2)),
             to_server_tx: None,
             stream_callback,
+            stream: Arc::new(RwLock::new(NetStream::Uninitialized)),
         }
     }
 
@@ -73,19 +75,30 @@ impl Connection {
         self.next_cmd_id.fetch_add(1, Ordering::SeqCst) as f64
     }
 
-    pub fn new_stream(&mut self) -> NetStream {
+    pub async fn new_stream(&mut self) -> NetStream {
         // looks like stream id is created on the server
         let cmd_id = self.get_next_cmd_id();
-        let to_server_tx = match &self.to_server_tx {
+        let mut to_server_tx = match &self.to_server_tx {
             Some(tx) => tx.clone(),
             None => panic!("need to be connected"),
         };
-        let mut runtime = self.runtime_guard.lock().unwrap();
 
-        runtime.block_on(async move {
-            create_stream(cmd_id, to_server_tx).await;
-        });
-        NetStream::Command(cmd_id)
+        let msg = Message::Command {
+            name: "createStream".to_string(),
+            id: cmd_id,
+            data: Value::Null,
+            opt: Vec::new(),
+        };
+        to_server_tx
+            .send(msg)
+            .await
+            .expect("queue 'createStream' message to server");
+
+        let new_stream = NetStream::Command(cmd_id);
+        let mut stream_ref = self.stream.write().unwrap();
+
+        *stream_ref = new_stream;
+        new_stream
     }
 
     //     to_server_rx: ownership moves to the spawned thread, its job is to
@@ -118,51 +131,56 @@ impl Connection {
         let connection = self.clone();
         let stream_callback = self.stream_callback;
         let _res_handle = runtime.spawn(async move {
-      trace!(target: "rtmp:message_receiver", "spawn recv handler");
-      let mut num: i32 = 1; // just for debugging
-      loop {
-        let msg = from_server_rx.recv().await.expect("recv from server");
-        trace!(target: "rtmp:message_receiver", "#{}) recv from server {:?}", num, msg);
-        if let Some(status) = msg.get_status() {
-          let v: Vec<&str> = status.code.split('.').collect();
-          match v[0] {
-            "NetConnection" => f(connection.clone(), msg),
-            _ => warn!(target: "rtmp:message_receiver", "unhandled status {:?}", status),
-          }
-        } else {
-          match msg {
-            Message::Response { id, .. } => {
-              if id == 2.0 {
-                trace!(target: "rtmp:message_receiver", "about to call stream_callback");
-                // let to_server_tx = Some(connection.to_server_tx.as_ref()).unwrap().clone();
+            trace!(target: "rtmp:message_receiver", "spawn recv handler");
+            let mut num: i32 = 1; // just for debugging
+            loop {
+                let msg = from_server_rx.recv().await.expect("recv from server");
+                trace!(target: "rtmp:message_receiver", "#{}) recv from server {:?}", num, msg);
+                if let Some(status) = msg.get_status() {
+                let v: Vec<&str> = status.code.split('.').collect();
+                match v[0] {
+                    "NetConnection" => f(connection.clone(), msg),
+                    _ => warn!(target: "rtmp:message_receiver", "unhandled status {:?}", status),
+                }
+                } else {
+                    match msg {
+                        Message::Response { id, .. } => {
+                        if id == 2.0 {
+                            trace!(target: "rtmp:message_receiver", "about to call stream_callback");
+                            // let to_server_tx = Some(connection.to_server_tx.as_ref()).unwrap().clone();
+                            // let mut stream_ref = self.stream.write().unwrap();
+                            // let new_stream = NetStream::Created(id as u32);
 
-                stream_callback(connection.clone(), msg);
-                // match opt {
-                //   Value::Number(stream_id) => {
-                //     // create stream
-                //     trace!(target: "rtmp:message_receiver", "publish");
-                //     publish(
-                //       stream_id as u32,
-                //       to_server_tx.clone(),
-                //       "cameraFeed".to_string(),
-                //       RecordFlag::Live,
-                //     )
-                //     .await;
-                //   }
-                //   _ => {
-                //     warn!(target: "rtmp:message_receiver", "unexpected opt type {:?}", opt);
-                //   }
-                // } // match opt
-              } // id == 2.0
+                            // *stream_ref = new_stream;
+
+                            //stream_callback(new_stream.clone(), msg);
+                            stream_callback(NetStream::Uninitialized, msg);
+                            // match opt {
+                            //   Value::Number(stream_id) => {
+                            //     // create stream
+                            //     trace!(target: "rtmp:message_receiver", "publish");
+                            //     publish(
+                            //       stream_id as u32,
+                            //       to_server_tx.clone(),
+                            //       "cameraFeed".to_string(),
+                            //       RecordFlag::Live,
+                            //     )
+                            //     .await;
+                            //   }
+                            //   _ => {
+                            //     warn!(target: "rtmp:message_receiver", "unexpected opt type {:?}", opt);
+                            //   }
+                            // } // match opt
+                        } // id == 2.0
+                        }
+                        _ => {
+                        warn!(target: "rtmp:connect_with_callback", "unhandled message from server {:?}", msg)
+                        }
+                    }
+                }
+                num += 1;
             }
-            _ => {
-              warn!(target: "rtmp:connect_with_callback", "unhandled message from server {:?}", msg)
-            }
-          }
-        }
-        num += 1;
-      }
-    });
+        });
     }
 
     // std API that returns immediately, then calls callback later
