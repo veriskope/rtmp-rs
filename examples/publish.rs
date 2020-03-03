@@ -19,7 +19,6 @@ async fn main() {
     let url = Url::parse(&format!("rtmp://{}/live/mystream", addr)).expect("url parse");
 
     let mut conn = rtmp::Connection::new(url, Some(stream_callback));
-    //let stream = conn.new_stream();
 
     // optional set timeout to 1 sec: conn.set_timeout(1000);
     conn.connect_with_callback(move |mut cn, response| {
