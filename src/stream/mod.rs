@@ -5,7 +5,7 @@ pub use flag::RecordFlag;
 // use log::trace;
 use tokio::sync::mpsc;
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub enum NetStream {
     // idea for a state machine, not sure this is the right approach
     Command(f64),

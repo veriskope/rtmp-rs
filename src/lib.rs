@@ -1,4 +1,4 @@
-#![warn(missing_debug_implementations)]
+#![warn(missing_debug_implementations, missing_copy_implementations)]
 
 // used in amf.rs
 #[macro_use]
