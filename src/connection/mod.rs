@@ -99,7 +99,7 @@ impl Connection {
         let new_stream = NetStream::Command(cmd_id);
         let mut stream_ref = self.stream.write().unwrap();
 
-        *stream_ref = new_stream;
+        *stream_ref = new_stream.clone();
         new_stream
     }
 
@@ -151,11 +151,10 @@ impl Connection {
                             trace!(target: "rtmp:message_receiver", "about to call stream_callback");
                             // let to_server_tx = Some(connection.to_server_tx.as_ref()).unwrap().clone();
                             let mut stream_ref = connection.stream.write().unwrap();
-                            let new_stream = NetStream::Created(id as u32);
+                            let new_stream = NetStream::Created(connection.clone(), id as u32);
+                            *stream_ref = new_stream.clone();
 
-                            *stream_ref = new_stream;
-
-                            stream_callback(new_stream.clone(), msg);
+                            stream_callback(new_stream, msg);
                             // stream_callback(NetStream::Uninitialized, msg);
                             // match opt {
                             //   Value::Number(stream_id) => {

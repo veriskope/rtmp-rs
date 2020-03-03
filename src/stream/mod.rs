@@ -1,16 +1,17 @@
 mod flag;
 // use crate::amf::Value;
 // use crate::Message;
+use crate::Connection;
 pub use flag::RecordFlag;
 // use log::trace;
 // use tokio::sync::mpsc;
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub enum NetStream {
     // idea for a state machine, not sure this is the right approach
     Uninitialized,
     Command(f64),
-    Created(u32),
+    Created(Connection, u32),
     // PublishRequest(String, RecordFlag),
 }
 
