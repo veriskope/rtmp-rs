@@ -100,7 +100,7 @@ impl Connection {
             .await
             .insert(cmd_id as u64, sender);
         if existing_subscriber.is_some() {
-            warn!("ignoring this unexpected thing");
+            warn!("ignoring unexpected response for {:?}", existing_subscriber);
         }
         receiver.await?
     }
@@ -111,28 +111,12 @@ impl Connection {
             MessageResponse {
                 opt: Value::Number(stream_id),
                 ..
-            } => Ok((NetStream::Created(self.clone(), stream_id as u32), msg)),
+            } => Ok((NetStream::new(stream_id as u32, self.clone()), msg)),
             MessageResponse { opt: _, .. } => Err(MessageError::new_status(
-                "A.Bug",
-                "The server isn't following the spec!",
+                "NetStream.Create.Failed", // TODO: check consistency
+                "Server did not provide a stream id number",
             )),
         }
-
-        // let msg = self.from_server_rx.filter(|msg| {
-        //     message_indicating_success => true,
-        //     message_indicating_failure => true,
-        //     _ => false,
-        // }).next().await;
-        // if let msg = message_indicating_success {
-        //     Ok(create_the_stream_from(msg))
-        // } else {
-        //     Err(msg)
-        // }
-
-        // let new_stream = NetStream::Command(cmd_id);
-        // let mut stream_ref = self.stream.write().unwrap();
-
-        // *stream_ref = new_stream.clone();
     }
 
     //     to_server_rx: ownership moves to the spawned thread, its job is to

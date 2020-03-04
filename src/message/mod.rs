@@ -229,7 +229,7 @@ impl Message {
                     }
                     "onStatus" => {
                         let opt = Value::read(&mut reader).await.expect("read optional data");
-                        trace!(target: "message::read", "_result optional data = {:?}", opt);
+                        trace!(target: "message::read", "_result optional data = {:#?}", opt);
                         if let Value::Object(h) = opt {
                             let result = Status::from_hash(&h);
                             if let Some(status) = result {

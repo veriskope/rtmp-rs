@@ -1,32 +1,49 @@
 mod flag;
-// use crate::amf::Value;
+use crate::amf::Value;
 use crate::message::*;
 use crate::Connection;
 pub use flag::RecordFlag;
-// use log::trace;
-// use tokio::sync::mpsc;
+use log::trace;
 
 #[derive(Clone, Debug)]
-pub enum NetStream {
-    Created(Connection, u32),
-    // PublishRequest(String, RecordFlag),
+pub struct NetStream {
+    id: u32,
+    cn: Connection,
+    status: NetStreamState,
+}
+
+#[derive(Clone, Debug)]
+pub enum NetStreamState {
+    Created,
+    Published(String, RecordFlag),
 }
 
 impl NetStream {
-    pub async fn publish(&mut self, name: &str, flag: RecordFlag) -> Result<(), MessageError> {
-        unimplemented!()
-        // let msg = self.send_command("createStream", Vec::new()).await?;
-        // match msg {
-        //     Message::Response {
-        //         opt: Value::Number(stream_id),
-        //         ..
-        //     } => Ok((NetStream::Created(self.clone(), stream_id as u32), msg)),
-        //     Message::Response { opt: _, .. } => Err(ErrorMessage::new_status(
-        //         "A.Bug",
-        //         "The server isn't following the spec!",
-        //     )),
-        //     _ => panic!("unimplemented!"),
-        // }
+    pub fn new(id: u32, cn: Connection) -> Self {
+        Self {
+            id,
+            cn,
+            status: NetStreamState::Created,
+        }
+    }
+
+    pub async fn publish(
+        &mut self,
+        name: &str,
+        flag: RecordFlag,
+    ) -> Result<MessageResponse, MessageError> {
+        use NetStreamState::*;
+
+        match self.status {
+            Created => {
+                let params = vec![Value::Utf8(name.into()), Value::Utf8(flag.to_string())];
+                let response = self.cn.send_command("publish", params).await?;
+                trace!("{:?}", response);
+                self.status = Published(name.into(), flag);
+                Ok(response)
+            }
+            _ => unimplemented!(),
+        }
     }
 }
 
