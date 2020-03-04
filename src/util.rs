@@ -1,3 +1,4 @@
+#![cfg(test)]
 use log::trace;
 
 //fn bytes_from_hex_string(hex_str: &str) -> &[u8] {
