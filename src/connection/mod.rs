@@ -80,11 +80,13 @@ impl Connection {
         name: &str,
         params: Vec<Value>,
     ) -> Result<MessageResponse, MessageError> {
-        self.send_raw_command(name, None, Value::Null, params).await
+        self.send_raw_command(CONNECTION_CHANNEL, name, GENERATE, Value::Null, params)
+            .await
     }
 
     pub async fn send_raw_command(
         &mut self,
+        stream_id: Option<u32>,
         name: &str,
         transaction_id: Option<u32>, // if not given, generate one
         data: Value,
@@ -98,7 +100,7 @@ impl Connection {
 
         let id: f64 = cmd_id.into();
         let msg = Message::new(
-            None,
+            stream_id,
             MessageData::Command(MessageCommand {
                 name: name.to_string(),
                 id,

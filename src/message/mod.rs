@@ -11,6 +11,17 @@ pub struct Message {
     pub data: MessageData,
 }
 
+pub const CONNECTION_CHANNEL: Option<u32> = None;
+
+// ideally want to do type checking, can I make an enum that is really an Option?
+// or does it need to be a new enum?
+// enum Channel {
+//     Connection = None,
+//     Stream = Some(u32)
+// }
+
+pub const GENERATE: Option<u32> = None;
+
 impl Message {
     pub fn new(stream_id: Option<u32>, data: MessageData) -> Self {
         Self {
