@@ -37,7 +37,10 @@ impl NetStream {
         match self.status {
             Created => {
                 let params = vec![Value::Utf8(name.into()), Value::Utf8(flag.to_string())];
-                let response = self.cn.send_command("publish", params).await?;
+                let response = self
+                    .cn
+                    .send_raw_command(Some(self.id), "publish", GENERATE, Value::Null, params)
+                    .await?;
                 trace!("{:?}", response);
                 self.status = Published(name.into(), flag);
                 Ok(response)
