@@ -8,7 +8,7 @@ pub mod amf;
 pub mod error;
 
 mod message;
-pub use message::Message;
+pub use message::{Message, MessageResponse};
 
 mod stream;
 pub use stream::NetStream;

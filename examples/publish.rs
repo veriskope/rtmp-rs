@@ -1,15 +1,15 @@
 extern crate pretty_env_logger;
-use rtmp::RecordFlag;
+use rtmp::{MessageResponse, NetStream, RecordFlag};
 use std::thread::sleep;
 use std::time::Duration;
 use url::Url;
 
-// fn stream_callback(stream: Option<&rtmp::NetStream>, msg: rtmp::Message) {
-//     println!(
-//         "===================> stream_callback: {:#?} {:#?}",
-//         stream, msg
-//     );
-// }
+fn stream_callback(stream: &NetStream, msg: MessageResponse) {
+    println!(
+        "===================> stream_callback: {:#?} {:#?}",
+        stream, msg
+    );
+}
 
 #[tokio::main]
 async fn main() {
@@ -30,12 +30,13 @@ async fn main() {
             //     Err(err_message) => (None, err_message.0),
             // };
             if let Ok((mut stream, message)) = cn.new_stream().await {
-                // stream_callback(Some(&stream), message);
+                println!("===> created stream: {:?}", stream);
+                stream_callback(&stream, message);
                 stream
                     .publish("cameraFeed", RecordFlag::Live)
                     .await
                     .unwrap();
-                println!("===> created stream: {:?}", stream);
+                println!("===> published stream: {:?}", stream);
             }
 
             // normal rust
