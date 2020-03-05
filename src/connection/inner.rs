@@ -147,6 +147,11 @@ impl InnerConnection {
                     Some(outgoing_msg) = self.rx_to_server.recv()  => {
                       trace!(target: "rtmp::Connection", "outgoing message: {:?}", outgoing_msg);
                       // TODO: this shouldn't be synchronous
+                      let mut tmp_buf = Vec::new();
+                      Chunk::write(&mut tmp_buf, Chunk::Msg(outgoing_msg.clone())).await?;
+                      trace!(target: "rtmp::Connection", "outgoing bytes: {:02x?}", tmp_buf);
+                      trace!(target: "rtmp::Connection", "num bytes: {:?}", tmp_buf.len());
+
                       Chunk::write(&mut self.cn.buf, Chunk::Msg(outgoing_msg)).await?;
                     }
                     Ok(response) = Chunk::read(&mut self.cn.buf) => {

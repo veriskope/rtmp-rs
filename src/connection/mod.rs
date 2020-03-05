@@ -1,6 +1,6 @@
 use log::{info, trace, warn};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use tokio::runtime::Handle;
 use tokio::sync::mpsc;
@@ -24,12 +24,12 @@ pub mod handshake;
 const CHANNEL_SIZE: usize = 100;
 
 type CommandsAwaitingResponse =
-    HashMap<u64, oneshot::Sender<Result<MessageResponse, MessageError>>>;
+    HashMap<u32, oneshot::Sender<Result<MessageResponse, MessageError>>>;
 
 #[derive(Clone, Debug)]
 pub struct Connection {
     url: Url,
-    next_cmd_id: Arc<AtomicUsize>,
+    next_cmd_id: Arc<AtomicU32>,
     to_server_tx: Option<mpsc::Sender<Message>>, // messages destined server go here
     // stream_callback: fn(NetStream, Message) -> (),
     commands_awaiting_response: Arc<Mutex<CommandsAwaitingResponse>>,
@@ -60,15 +60,19 @@ impl Connection {
 
         Connection {
             url,
-            next_cmd_id: Arc::new(AtomicUsize::new(2)),
+            next_cmd_id: Arc::new(AtomicU32::new(1)),
             to_server_tx: None,
             commands_awaiting_response: Default::default(), //Arc::new(Mutex::new(HashMap::new()))
         }
     }
 
-    fn get_next_cmd_id(&self) -> f64 {
-        // TODO: Handle rollover - look at wrapping_add
-        self.next_cmd_id.fetch_add(1, Ordering::SeqCst) as f64
+    // get_next_cmd_id generates a unique Command transaction id
+    // for all outstanding requests
+    // can be recycled once a response has been received
+    // allows for 2^32 requests, typically there will be only a few
+    fn get_next_cmd_id(&self) -> u32 {
+        // fetch_add wraps around on overflow
+        self.next_cmd_id.fetch_add(1, Ordering::SeqCst)
     }
 
     pub async fn send_command(
@@ -76,19 +80,30 @@ impl Connection {
         name: &str,
         params: Vec<Value>,
     ) -> Result<MessageResponse, MessageError> {
-        let cmd_id = self.get_next_cmd_id();
+        self.send_raw_command(name, None, Value::Null, params).await
+    }
+
+    pub async fn send_raw_command(
+        &mut self,
+        name: &str,
+        transaction_id: Option<u32>, // if not given, generate one
+        data: Value,
+        opt: Vec<Value>,
+    ) -> Result<MessageResponse, MessageError> {
+        let cmd_id = transaction_id.unwrap_or_else(|| self.get_next_cmd_id());
         let mut to_server_tx = match &self.to_server_tx {
             Some(tx) => tx.clone(),
             None => panic!("need to be connected"),
         };
 
+        let id: f64 = cmd_id.into();
         let msg = Message::new(
             None,
             MessageData::Command(MessageCommand {
                 name: name.to_string(),
-                id: cmd_id,
-                data: Value::Null,
-                opt: params,
+                id,
+                data,
+                opt,
             }),
         );
         to_server_tx.send(msg).await?;
@@ -98,7 +113,7 @@ impl Connection {
             .commands_awaiting_response
             .lock()
             .await
-            .insert(cmd_id as u64, sender);
+            .insert(cmd_id, sender);
         if existing_subscriber.is_some() {
             warn!("ignoring unexpected response for {:?}", existing_subscriber);
         }
@@ -164,7 +179,7 @@ impl Connection {
                     match msg {
                         Message { data: MessageData::Response(response), .. } => {
                             let response_id = response.id;
-                            if let Some(sender) = connection.commands_awaiting_response.lock().await.remove(&(response_id as u64)) {
+                            if let Some(sender) = connection.commands_awaiting_response.lock().await.remove(&(response_id as u32)) {
                                 if sender.send(Ok(response)).is_err() {
                                     warn!("Receiver for cmd {} went away", response_id);
                                 }

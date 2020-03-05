@@ -116,7 +116,7 @@ impl Chunk {
         T: AsyncWrite + Unpin,
     {
         trace!(target: "chunk::write", "{:?}", chunk);
-        let _bytes_written: u32 = 0;
+        let mut bytes_written = 0;
         let mut buf = Vec::new();
 
         // get header info from message
@@ -166,6 +166,7 @@ impl Chunk {
 
                 let stream_id_bytes = stream_id.to_le_bytes();
                 header.write(&stream_id_bytes).await.expect("stream id");
+                trace!(target: "chunk::write", "header len: {:?}", header.len());
                 // hack
                 // let hex_str = format!(
                 //   "{:02x} 00 00 00 00 00 {:02x} 14  {:02x} 00 00 00",
@@ -179,14 +180,18 @@ impl Chunk {
                 //   .await
                 //   .expect("write chunk header");
                 trace!(target: "chunk::write", "header: {:02x?}", &header.buf);
-                writer.write(&header).await.expect("write payload");
+                let header_size = writer.write(&header).await.expect("write header");
+                bytes_written += header_size;
 
                 trace!(target: "chunk::write", "payload: {:02x?}", &buf);
-                writer.write(&buf).await.expect("write payload");
+                let data_size = writer.write(&buf).await.expect("write payload");
+                bytes_written += data_size;
+
+                // TODO: use write_exact to detect socket close
             } // Chunk::Msg
         }; // match chunk
-
-        Ok(_bytes_written)
+        assert_eq!(bytes_written <= (u32::max_value() as usize), true);
+        Ok(bytes_written as u32)
     } // fn write
 } // impl Chunk
 
@@ -232,11 +237,12 @@ mod tests {
 
         let mut buf = Vec::new();
 
-        let _num_bytes = Chunk::write(&mut buf, Chunk::Msg(cmd))
+        let num_bytes = Chunk::write(&mut buf, Chunk::Msg(cmd))
             .await
             .expect("write");
-        // test will fail if expect is triggered
-        // assert_eq!(num_bytes, expected_bytes);
+        // println!("bytes written: {:02x?}", buf);
+        // println!("num bytes written: {:?}", buf.len());
+        assert_eq!(num_bytes, 142);
     }
 
     #[tokio::test]
