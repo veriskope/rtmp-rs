@@ -86,7 +86,7 @@ impl InnerConnection {
         chunk: Chunk,
         mut tx: mpsc::Sender<Message>,
     ) -> io::Result<()> {
-        trace!(target: "rtmp::Connection", "{:?}", chunk);
+        trace!(target: "rtmp::Connection", "handle_chunk {:?}", chunk);
         match chunk {
             Chunk::Control(Signal::SetWindowAckSize(size)) => {
                 self.window_ack_size = size;
@@ -119,12 +119,12 @@ impl InnerConnection {
                                 self.is_connected.fetch_or(true, Ordering::SeqCst);
                             } // TODO: check for disconnect
                         }
-                        tx.send(m)
-                            .await
-                            .expect("transfer message to trigger callback");
                     }
-                    _ => warn!(target: "rtmp::Connection", "unhandled message: {:?}", m),
+                    _ => {}
                 };
+                tx.send(m)
+                    .await
+                    .expect("transfer message to trigger callback");
             }
             _ => warn!(target: "rtmp::Connection", "unhandled chunk: {:?}", chunk),
         }
