@@ -3,25 +3,39 @@ use crate::amf::Value;
 use crate::message::*;
 use crate::Connection;
 pub use flag::RecordFlag;
-use log::trace;
+use log::{trace, warn};
+use std::sync::Arc;
 use tokio::runtime::Handle;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 
 #[derive(Clone, Debug)]
 pub struct NetStream {
     id: u32,
     cn: Connection,
     pub notify: mpsc::Sender<MessageStatus>,
-    status: NetStreamState,
+    state: Arc<Mutex<NetStreamState>>,
 }
 
 #[derive(Clone, Debug)]
 pub enum NetStreamState {
     Created,
-    PublishRequest(String, RecordFlag),
-    Published(String, RecordFlag),
+    PublishRequest(PublishInfo),
+    Published(PublishInfo),
 }
 
+impl Default for NetStreamState {
+    fn default() -> Self {
+        NetStreamState::Created
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct PublishInfo {
+    name: String,
+    flag: RecordFlag,
+}
+
+use NetStreamState::*;
 impl NetStream {
     pub fn new(id: u32, cn: Connection) -> Self {
         let (tx, mut rx) = mpsc::channel::<MessageStatus>(100);
@@ -29,14 +43,29 @@ impl NetStream {
             id,
             cn,
             notify: tx,
-            status: NetStreamState::Created,
+            state: Default::default(),
         };
 
         let stream = new_stream.clone(); // xfer to closure
         Handle::current().spawn(async move {
-            while let Some(status) = rx.recv().await {
-                // MessageStatus for stream
-                trace!(target: "NetStream::receiver", "recv stream msg = {:#?}", status);
+            loop {
+                let option = rx.recv().await;     // why would this ever be None?
+                trace!(target: "NetStream::receiver", "recv stream option = {:#?}", option);
+                if let Some(msg_status) = option {
+                    let mut state_ref = stream.state.lock().await;
+                    // MessageStatus for stream
+                    trace!(target: "NetStream::receiver", "recv stream msg = {:#?}", msg_status);
+
+                    match &*state_ref {
+                        PublishRequest(info) => {
+                            if msg_status.code == "NetStream.Publish.Start".to_string() {
+                                *state_ref = Published(info.clone()); // seems like I should be able to move here
+                            }
+                        },
+                        _ =>  warn!(target: "NetStream::receiver", "NetStream state = {:?}, received unexpected message = {:#?}", stream.state, msg_status),
+
+                    }
+                }
             }
         });
         new_stream
@@ -47,12 +76,16 @@ impl NetStream {
         name: &str,
         flag: RecordFlag,
     ) -> Result<MessageResponse, MessageError> {
-        use NetStreamState::*;
+        trace!(target: "NetStream::publish", "{}: {}", name, flag);
+        let mut state_ref = self.state.lock().await;
 
-        match self.status {
+        match *state_ref {
             Created => {
                 let params = vec![Value::Utf8(name.into()), Value::Utf8(flag.to_string())];
-                self.status = PublishRequest(name.into(), flag);
+                *state_ref = PublishRequest(PublishInfo {
+                    name: name.to_string(),
+                    flag,
+                });
                 let response = self
                     .cn
                     .send_raw_command(Some(self.id), "publish", GENERATE, Value::Null, params)

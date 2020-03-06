@@ -63,7 +63,7 @@ impl Connection {
 
         Connection {
             url,
-            next_cmd_id: Arc::new(AtomicU32::new(1)),
+            next_cmd_id: Arc::new(AtomicU32::new(2)),
             to_server_tx: None,
             commands_awaiting_response: Default::default(),
             streams_awaiting_status: Default::default(),
@@ -182,42 +182,42 @@ impl Connection {
             loop {
                 let msg = from_server_rx.recv().await.expect("recv from server");
                 trace!(target: "rtmp:message_receiver", "#{}) recv from server {:?}", num, msg);
+                match msg {
+                    Message { data: MessageData::Response(MessageResponse {id: 1.0, .. }), .. } => {
+                        f(connection.clone(), msg);
+                    },
+                    Message { data: MessageData::Response(response), .. } => {
+                    let cmd_id = response.id as u32;
 
-                if let Some(status) = msg.get_status() {
-                    let v: Vec<&str> = status.code.split('.').collect();
-                    match v[0] {
-                        "NetConnection" => f(connection.clone(), msg),
-                        _ => warn!(target: "rtmp:message_receiver", "unhandled status {:?}", status),
-                    }
-                } else {
-                    match msg {
-                        Message { data: MessageData::Response(response), .. } => {
-                            let response_id = response.id;
-                            if let Some(sender) = connection.commands_awaiting_response.lock().await.remove(&(response_id as u32)) {
-                                if sender.send(Ok(response)).is_err() {
-                                    warn!("Receiver for cmd {} went away", response_id);
-                                }
-                            } else {
-                                warn!("Got a response to a command but we don't know what to do with it!");
+                        if let Some(sender) = connection.commands_awaiting_response.lock().await.remove(&cmd_id) {
+                            if sender.send(Ok(response)).is_err() {
+                                warn!("Receiver for cmd {} went away", cmd_id);
                             }
-                        },
-                        Message { stream_id, data: MessageData::Status(status) } => {
-                            if stream_id == 0 {
-                                panic!("unexpected status with stream id 0");   // TODO: I think this means it is a NetConnection status message
-                            } else {
-                                if let Some(sender) = connection.streams_awaiting_status.lock().await.get_mut(&stream_id) {
-                                    if sender.send(status).await.is_err() {
-                                        warn!("Stream Receiver for stream id #{} went away", stream_id);
-                                    }
-                                } else {
-                                    warn!("Got a status on stream {} with no receiver!", stream_id);
-                                }
-                            }
-
-                        },
-                        _ => {
-                            warn!(target: "rtmp:connect_with_callback", "unhandled message from server {:?}", msg)
+                        } else {
+                            warn!("Got a response for unregistered command {}", cmd_id);
                         }
+                    },
+                    Message { stream_id, data: MessageData::Status(status) } => {
+                        trace!(target: "rtmp:message_receiver", "status: {:?}", status);
+                        if stream_id == 0 {
+                            panic!("unexpected status with stream id 0");   // TODO: I think this means it is a NetConnection status message
+                        } else {
+                            if let Some(sender) = connection.streams_awaiting_status.lock().await.get_mut(&stream_id) {
+                                trace!(target: "rtmp:message_receiver", "sending...");
+
+                                if sender.send(status).await.is_err() {
+                                    warn!("Stream Receiver for stream id #{} went away", stream_id);
+                                } else {
+                                    trace!(target: "rtmp:message_receiver", "sent!");
+                                }
+                            } else {
+                                warn!("Got a status on stream {} with no receiver!", stream_id);
+                            }
+                        }
+
+                    },
+                    _ => {
+                        warn!(target: "rtmp:connect_with_callback", "unhandled message from server {:?}", msg)
                     }
                 }
                 num += 1;
