@@ -126,6 +126,32 @@ impl Connection {
         receiver.await?
     }
 
+    // streams use transaction id = 0, success or error happens via status
+    //
+    pub async fn send_stream_command(
+        &mut self,
+        stream_id: Option<u32>,
+        name: &str,
+        params: Vec<Value>,
+    ) -> Result<(), MessageError> {
+        let mut to_server_tx = match &self.to_server_tx {
+            Some(tx) => tx.clone(),
+            None => panic!("need to be connected"),
+        };
+
+        let msg = Message::new(
+            stream_id,
+            MessageData::Command(MessageCommand {
+                name: name.to_string(),
+                id: 0.0,
+                data: Value::Null,
+                opt: params,
+            }),
+        );
+        to_server_tx.send(msg).await?;
+        Ok(())
+    }
+
     pub async fn new_stream(&mut self) -> Result<(NetStream, MessageResponse), MessageError> {
         let msg = self.send_command("createStream", Vec::new()).await?;
         match msg {

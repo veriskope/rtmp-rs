@@ -4,16 +4,30 @@ use crate::message::*;
 use crate::Connection;
 pub use flag::RecordFlag;
 use log::{trace, warn};
+use std::fmt;
 use std::sync::Arc;
 use tokio::runtime::Handle;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, RwLock};
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct NetStream {
     id: u32,
     cn: Connection,
     pub notify: mpsc::Sender<MessageStatus>,
-    state: Arc<Mutex<NetStreamState>>,
+    state: Arc<RwLock<NetStreamState>>,
+}
+
+impl fmt::Debug for NetStream {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        futures::executor::block_on(async move {
+            let state_ref = self.state.read().await;
+            write!(
+                f,
+                "NetStream {{ id: {}, state: {:?} }}",
+                self.id, *state_ref
+            )
+        })
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -49,21 +63,24 @@ impl NetStream {
         let stream = new_stream.clone(); // xfer to closure
         Handle::current().spawn(async move {
             loop {
-                let option = rx.recv().await;     // why would this ever be None?
+                let option = rx.recv().await; // why would this ever be None?
                 trace!(target: "NetStream::receiver", "recv stream option = {:#?}", option);
                 if let Some(msg_status) = option {
-                    let mut state_ref = stream.state.lock().await;
                     // MessageStatus for stream
                     trace!(target: "NetStream::receiver", "recv stream msg = {:#?}", msg_status);
 
-                    match &*state_ref {
-                        PublishRequest(info) => {
-                            if msg_status.code == "NetStream.Publish.Start".to_string() {
-                                *state_ref = Published(info.clone()); // seems like I should be able to move here
+                    if msg_status.code == "NetStream.Publish.Start" {
+                        {
+                            let mut state_ref = stream.state.write().await;
+                            trace!(target: "NetStream::receiver", "recv stream *state_ref = {:?}", *state_ref);
+                            let old_state = (*state_ref).clone();
+                            if let PublishRequest(info) = old_state {
+                                *state_ref = Published(info.clone());
+                            } else {
+                                warn!("state should be PublishRequest");
                             }
-                        },
-                        _ =>  warn!(target: "NetStream::receiver", "NetStream state = {:?}, received unexpected message = {:#?}", stream.state, msg_status),
-
+                        }
+                        trace!(target: "NetStream::receiver", "end Some(msg_status), stream: {:?}", stream);
                     }
                 }
             }
@@ -71,30 +88,29 @@ impl NetStream {
         new_stream
     }
 
-    pub async fn publish(
-        &mut self,
-        name: &str,
-        flag: RecordFlag,
-    ) -> Result<MessageResponse, MessageError> {
+    pub async fn publish(&mut self, name: &str, flag: RecordFlag) -> Result<(), MessageError> {
         trace!(target: "NetStream::publish", "{}: {}", name, flag);
-        let mut state_ref = self.state.lock().await;
+        let mut state_ref = self.state.write().await;
 
-        match *state_ref {
+        let result = match *state_ref {
             Created => {
                 let params = vec![Value::Utf8(name.into()), Value::Utf8(flag.to_string())];
                 *state_ref = PublishRequest(PublishInfo {
                     name: name.to_string(),
                     flag,
                 });
+                drop(state_ref);
                 let response = self
                     .cn
-                    .send_raw_command(Some(self.id), "publish", GENERATE, Value::Null, params)
+                    .send_stream_command(Some(self.id), "publish", params)
                     .await?;
                 trace!("{:?}", response);
                 Ok(response)
             }
             _ => unimplemented!(),
-        }
+        };
+        trace!(target: "NetStream::publish", "publish request sent: {:?}", self);
+        result
     }
 }
 
