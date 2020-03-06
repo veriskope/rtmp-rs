@@ -4,27 +4,42 @@ use crate::message::*;
 use crate::Connection;
 pub use flag::RecordFlag;
 use log::trace;
+use tokio::runtime::Handle;
+use tokio::sync::mpsc;
 
 #[derive(Clone, Debug)]
 pub struct NetStream {
     id: u32,
     cn: Connection,
+    pub notify: mpsc::Sender<MessageStatus>,
     status: NetStreamState,
 }
 
 #[derive(Clone, Debug)]
 pub enum NetStreamState {
     Created,
+    PublishRequest(String, RecordFlag),
     Published(String, RecordFlag),
 }
 
 impl NetStream {
     pub fn new(id: u32, cn: Connection) -> Self {
-        Self {
+        let (tx, mut rx) = mpsc::channel::<MessageStatus>(100);
+        let new_stream = Self {
             id,
             cn,
+            notify: tx,
             status: NetStreamState::Created,
-        }
+        };
+
+        let stream = new_stream.clone(); // xfer to closure
+        Handle::current().spawn(async move {
+            while let Some(status) = rx.recv().await {
+                // MessageStatus for stream
+                trace!(target: "NetStream::receiver", "recv stream msg = {:#?}", status);
+            }
+        });
+        new_stream
     }
 
     pub async fn publish(
@@ -37,12 +52,12 @@ impl NetStream {
         match self.status {
             Created => {
                 let params = vec![Value::Utf8(name.into()), Value::Utf8(flag.to_string())];
+                self.status = PublishRequest(name.into(), flag);
                 let response = self
                     .cn
                     .send_raw_command(Some(self.id), "publish", GENERATE, Value::Null, params)
                     .await?;
                 trace!("{:?}", response);
-                self.status = Published(name.into(), flag);
                 Ok(response)
             }
             _ => unimplemented!(),

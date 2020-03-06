@@ -62,6 +62,7 @@ pub struct MessageResponse {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MessageStatus {
+    pub level: String, // TODO: change to enum?
     pub code: String,
     pub description: String,
 }
@@ -75,6 +76,14 @@ pub struct MessageError(pub MessageStatus);
 impl MessageError {
     pub(crate) fn new_status(code: &str, description: &str) -> Self {
         Self(MessageStatus {
+            level: "status".into(),
+            code: code.into(),
+            description: description.into(),
+        })
+    }
+    pub(crate) fn new_error(code: &str, description: &str) -> Self {
+        Self(MessageStatus {
+            level: "error".into(),
             code: code.into(),
             description: description.into(),
         })
@@ -83,7 +92,7 @@ impl MessageError {
 
 impl<T> From<SendError<T>> for MessageError {
     fn from(_: SendError<T>) -> Self {
-        Self::new_status(
+        Self::new_error(
             "Something.Closed",
             "The connection was previously closed due to an IO error or there's a bug",
         )
@@ -92,7 +101,7 @@ impl<T> From<SendError<T>> for MessageError {
 
 impl From<RecvError> for MessageError {
     fn from(_: RecvError) -> Self {
-        Self::new_status("A.Bug", "A command id was reused because of a bug")
+        Self::new_error("A.Bug", "A command id was reused because of a bug")
     }
 }
 
@@ -139,9 +148,15 @@ impl fmt::Display for Message {
                 write!(f, "Response '_result' #{}", id)
             }
             MessageData::Error(..) => write!(f, "Response '_error' #(oops unimplemented)"),
-            MessageData::Status(MessageStatus { code, description }) => {
-                write!(f, "Response 'onStatus' {}: {}", code, description)
-            }
+            MessageData::Status(MessageStatus {
+                level,
+                code,
+                description,
+            }) => write!(
+                f,
+                "Response 'onStatus' {}: {} \n   {}",
+                level, code, description
+            ),
         }
     }
 }
@@ -160,6 +175,7 @@ impl fmt::Display for Message {
 //       which also has optional 'application' field
 #[derive(Copy, Clone, Debug)]
 pub struct Status<'a> {
+    pub level: &'a str,
     pub code: &'a str,
     pub description: &'a str,
     pub encoding: u32,
@@ -172,30 +188,28 @@ impl Status<'_> {
         //  "level": Utf8("status"),
         //  "objectEncoding": Number(0.0),
         //   "description": Utf8("Connection succeeded.")}) }
-        if let Some(s) = Value::object_get_str(h, "level") {
-            if s != "status" {
-                return None;
-            }
 
-            let code = Value::object_get_str(h, "code").unwrap_or("");
-            if code == "" {
-                warn!(target: "Status::from_hash", "did not find code value in: {:?}", h);
-            }
+        // TODO: return None if code or level is missing
+        let level = Value::object_get_str(h, "level").unwrap_or("");
 
-            let encoding = Value::object_get_number(h, "objectEncoding").unwrap_or(0.0) as u32;
-
-            let description = Value::object_get_str(h, "description").unwrap_or("");
-
-            return Some(
-                Status {
-                    code,
-                    description,
-                    encoding,
-                }
-                .to_owned(),
-            );
+        let code = Value::object_get_str(h, "code").unwrap_or("");
+        if code == "" {
+            warn!(target: "Status::from_hash", "did not find code value in: {:?}", h);
         }
-        None
+
+        let encoding = Value::object_get_number(h, "objectEncoding").unwrap_or(0.0) as u32;
+
+        let description = Value::object_get_str(h, "description").unwrap_or("");
+
+        Some(
+            Status {
+                level,
+                code,
+                description,
+                encoding,
+            }
+            .to_owned(),
+        )
     }
 } // impl Status
 
@@ -245,6 +259,7 @@ impl Message {
                             let result = Status::from_hash(&h);
                             if let Some(status) = result {
                                 MessageData::Status(MessageStatus {
+                                    level: status.level.to_string(),
                                     code: status.code.to_string(),
                                     description: status.description.to_string(),
                                 })

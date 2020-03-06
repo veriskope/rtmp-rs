@@ -26,6 +26,8 @@ const CHANNEL_SIZE: usize = 100;
 type CommandsAwaitingResponse =
     HashMap<u32, oneshot::Sender<Result<MessageResponse, MessageError>>>;
 
+type StreamsAwaitingStatus = HashMap<u32, mpsc::Sender<MessageStatus>>;
+
 #[derive(Clone, Debug)]
 pub struct Connection {
     url: Url,
@@ -33,6 +35,7 @@ pub struct Connection {
     to_server_tx: Option<mpsc::Sender<Message>>, // messages destined server go here
     // stream_callback: fn(NetStream, Message) -> (),
     commands_awaiting_response: Arc<Mutex<CommandsAwaitingResponse>>,
+    streams_awaiting_status: Arc<Mutex<StreamsAwaitingStatus>>,
 }
 
 // how to support closure as well as functions?
@@ -62,7 +65,8 @@ impl Connection {
             url,
             next_cmd_id: Arc::new(AtomicU32::new(1)),
             to_server_tx: None,
-            commands_awaiting_response: Default::default(), //Arc::new(Mutex::new(HashMap::new()))
+            commands_awaiting_response: Default::default(),
+            streams_awaiting_status: Default::default(),
         }
     }
 
@@ -128,7 +132,15 @@ impl Connection {
             MessageResponse {
                 opt: Value::Number(stream_id),
                 ..
-            } => Ok((NetStream::new(stream_id as u32, self.clone()), msg)),
+            } => {
+                let id = stream_id as u32;
+                let stream = NetStream::new(id, self.clone());
+                self.streams_awaiting_status
+                    .lock()
+                    .await
+                    .insert(id, stream.notify.clone());
+                Ok((stream, msg))
+            }
             MessageResponse { opt: _, .. } => Err(MessageError::new_status(
                 "NetStream.Create.Failed", // TODO: check consistency
                 "Server did not provide a stream id number",
@@ -188,7 +200,21 @@ impl Connection {
                             } else {
                                 warn!("Got a response to a command but we don't know what to do with it!");
                             }
-                        }
+                        },
+                        Message { stream_id, data: MessageData::Status(status) } => {
+                            if stream_id == 0 {
+                                panic!("unexpected status with stream id 0");   // TODO: I think this means it is a NetConnection status message
+                            } else {
+                                if let Some(sender) = connection.streams_awaiting_status.lock().await.get_mut(&stream_id) {
+                                    if sender.send(status).await.is_err() {
+                                        warn!("Stream Receiver for stream id #{} went away", stream_id);
+                                    }
+                                } else {
+                                    warn!("Got a status on stream {} with no receiver!", stream_id);
+                                }
+                            }
+
+                        },
                         _ => {
                             warn!(target: "rtmp:connect_with_callback", "unhandled message from server {:?}", msg)
                         }
