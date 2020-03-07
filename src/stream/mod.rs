@@ -51,6 +51,25 @@ pub struct PublishInfo {
 
 use NetStreamState::*;
 impl NetStream {
+    // called for every status message received on this stream
+    async fn handle_message(&self, msg_status: MessageStatus) {
+        // MessageStatus for stream
+
+        if msg_status.code == "NetStream.Publish.Start" {
+            {
+                let mut state_ref = self.state.write().await;
+                trace!(target: "NetStream::receiver", "recv stream *state_ref = {:?}", *state_ref);
+                let old_state = (*state_ref).clone();
+                if let PublishRequest(info) = old_state {
+                    *state_ref = Published(info.clone());
+                } else {
+                    warn!("state should be PublishRequest");
+                }
+            }
+            trace!(target: "NetStream::receiver", "end Some(msg_status), stream: {:?}", self);
+        }
+    }
+
     pub fn new(id: u32, cn: Connection) -> Self {
         let (tx, mut rx) = mpsc::channel::<MessageStatus>(100);
         let new_stream = Self {
@@ -66,28 +85,16 @@ impl NetStream {
                 let option = rx.recv().await; // why would this ever be None?
                 trace!(target: "NetStream::receiver", "recv stream option = {:#?}", option);
                 if let Some(msg_status) = option {
-                    // MessageStatus for stream
                     trace!(target: "NetStream::receiver", "recv stream msg = {:#?}", msg_status);
-
-                    if msg_status.code == "NetStream.Publish.Start" {
-                        {
-                            let mut state_ref = stream.state.write().await;
-                            trace!(target: "NetStream::receiver", "recv stream *state_ref = {:?}", *state_ref);
-                            let old_state = (*state_ref).clone();
-                            if let PublishRequest(info) = old_state {
-                                *state_ref = Published(info.clone());
-                            } else {
-                                warn!("state should be PublishRequest");
-                            }
-                        }
-                        trace!(target: "NetStream::receiver", "end Some(msg_status), stream: {:?}", stream);
-                    }
+                    stream.handle_message(msg_status).await;
                 }
             }
         });
         new_stream
     }
 
+    // TODO: Rename `publish_request` or change waits to receive
+    // message from server and return success/failure message
     pub async fn publish(&mut self, name: &str, flag: RecordFlag) -> Result<(), MessageError> {
         trace!(target: "NetStream::publish", "{}: {}", name, flag);
         let mut state_ref = self.state.write().await;
