@@ -1,6 +1,6 @@
 use log::{info, trace, warn};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use tokio::runtime::Handle;
 use tokio::sync::mpsc;
@@ -31,6 +31,7 @@ type StreamsAwaitingStatus = HashMap<u32, mpsc::Sender<MessageStatus>>;
 #[derive(Clone, Debug)]
 pub struct Connection {
     url: Url,
+    is_connected: Arc<AtomicBool>,
     next_cmd_id: Arc<AtomicU32>,
     to_server_tx: Option<mpsc::Sender<Message>>, // messages destined server go here
     // stream_callback: fn(NetStream, Message) -> (),
@@ -63,11 +64,20 @@ impl Connection {
 
         Connection {
             url,
+            is_connected: Default::default(),
             next_cmd_id: Arc::new(AtomicU32::new(2)),
             to_server_tx: None,
             commands_awaiting_response: Default::default(),
             streams_awaiting_status: Default::default(),
         }
+    }
+
+    pub fn is_connected(&self) -> bool {
+        self.is_connected.load(Ordering::SeqCst)
+    }
+
+    pub fn set_connected(&self, connected: bool) {
+        self.is_connected.fetch_or(connected, Ordering::SeqCst);
     }
 
     // get_next_cmd_id generates a unique Command transaction id
@@ -298,7 +308,18 @@ impl Connection {
             // - handshake completion
             // - queued command gets sent in process_message_loop
             // - receive connect response
-            self.send_connect_command().await.expect("connect command");
+            let response = self.send_connect_command().await;
+            if let Ok(msg) = response {
+                if let Some(ref status) = msg.get_status() {
+                    trace!(target: "rtmp::Connection", "connect command response: {:?}", status);
+                    if status.code == "NetConnection.Connect.Success" {
+                        trace!(target: "rtmp::Connection", "setting is_connected: {}", true);
+                        self.set_connected(true);
+                    } else {
+                        self.set_connected(false);
+                    }
+                }
+            }
         });
 
         Ok(())

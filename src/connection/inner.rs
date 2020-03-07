@@ -1,5 +1,4 @@
 use log::{trace, warn};
-use std::sync::atomic::{AtomicBool, Ordering};
 use url::Url;
 
 use tokio::prelude::*;
@@ -14,12 +13,10 @@ use super::handshake::{Handshake, HandshakeProcessResult, PeerType};
 
 // private connection owned by read/write thread
 pub struct InnerConnection {
-    url: Url,
     rx_to_server: mpsc::Receiver<Message>,
     cn: BufReadWriter<BufReader<TcpStream>>,
     window_ack_size: u32,
     chunk_size: u32,
-    is_connected: AtomicBool,
 }
 
 impl InnerConnection {
@@ -37,19 +34,13 @@ impl InnerConnection {
         tcp.set_nodelay(true).expect("set_nodelay call failed");
 
         let mut cn = InnerConnection {
-            url,
             rx_to_server,
             cn: BufReadWriter::new(BufReader::new(tcp)),
             window_ack_size: 2500000,
             chunk_size: 1024, // TODO: is this a good default?
-            is_connected: AtomicBool::new(false),
         };
         cn.connect_handshake().await.unwrap();
         cn
-    }
-
-    fn is_connected(&self) -> bool {
-        self.is_connected.load(Ordering::SeqCst)
     }
 
     async fn handle_chunk(
@@ -77,22 +68,7 @@ impl InnerConnection {
             }
 
             Chunk::Msg(m) => {
-                match m {
-                    // Command { name: String, id: u32, data: Value, opt: Value },
-                    Message {
-                        data: MessageData::Response(..),
-                        ..
-                    } => {
-                        trace!(target: "rtmp::Connection", "tx: {}", m);
-                        if let Some(status) = m.get_status() {
-                            if status.code == "NetConnection.Connect.Success" {
-                                trace!(target: "rtmp::Connection", "setting is_connected: {}", true);
-                                self.is_connected.fetch_or(true, Ordering::SeqCst);
-                            } // TODO: check for disconnect
-                        }
-                    }
-                    _ => {}
-                };
+                trace!(target: "rtmp::Connection", "tx message {:?}", m);
                 tx.send(m)
                     .await
                     .expect("transfer message to trigger callback");

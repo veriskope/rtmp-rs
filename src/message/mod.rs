@@ -60,6 +60,15 @@ pub struct MessageResponse {
     pub opt: Value,
 }
 
+impl MessageResponse {
+    pub fn get_status(&self) -> Option<Status> {
+        match &self.opt {
+            Value::Object(h) => Status::from_hash(h),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct MessageStatus {
     pub level: String, // TODO: change to enum?
@@ -215,13 +224,9 @@ impl Status<'_> {
 
 impl Message {
     pub fn get_status(&self) -> Option<Status> {
-        if let MessageData::Response(response_data) = &self.data {
-            match &response_data.opt {
-                Value::Object(h) => Status::from_hash(h),
-                _ => None,
-            }
-        } else {
-            None
+        match &self.data {
+            MessageData::Response(response) => response.get_status(),
+            _ => None,
         }
     }
 
