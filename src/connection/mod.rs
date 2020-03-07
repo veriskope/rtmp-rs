@@ -231,11 +231,7 @@ impl Connection {
         });
     }
 
-    pub fn spawn_message_receiver(
-        &mut self,
-        f: impl Fn(Connection, Message) -> () + Send + 'static,
-        mut from_server_rx: mpsc::Receiver<Message>,
-    ) {
+    pub fn spawn_message_receiver(&mut self, mut from_server_rx: mpsc::Receiver<Message>) {
         let runtime = Handle::current();
         let connection = self.clone();
         let _res_handle = runtime.spawn(async move {
@@ -245,9 +241,6 @@ impl Connection {
                 let msg = from_server_rx.recv().await.expect("recv from server");
                 trace!(target: "rtmp:message_receiver", "#{}) recv from server {:?}", num, msg);
                 match msg {
-                    Message { data: MessageData::Response(MessageResponse {id: 1.0, .. }), .. } => {
-                        f(connection.clone(), msg);
-                    },
                     Message { data: MessageData::Response(response), .. } => {
                     let cmd_id = response.id as u32;
 
@@ -287,12 +280,7 @@ impl Connection {
         });
     }
 
-    // std API that returns immediately, then calls callback later
-    pub fn connect_with_callback(
-        &mut self,
-        f: impl Fn(Connection, Message) -> () + Send + 'static,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        trace!(target: "rtmp:connect_with_callback", "url: {}", self.url);
+    pub async fn connect(&mut self) -> Result<MessageResponse, MessageError> {
         let (from_server_tx, from_server_rx) = mpsc::channel::<Message>(CHANNEL_SIZE);
 
         let (to_server_tx, to_server_rx) = mpsc::channel::<Message>(CHANNEL_SIZE);
@@ -300,25 +288,47 @@ impl Connection {
         self.to_server_tx = Some(to_server_tx); // Connection methods use this to send messages to server
 
         self.spawn_socket_process_loop(to_server_rx, from_server_tx);
-        self.spawn_message_receiver(f, from_server_rx);
+        self.spawn_message_receiver(from_server_rx);
+        // queue the connect command, then await ...
+        // - handshake completion
+        // - queued command gets sent in process_message_loop
+        // - receive connect response
+        let response = self.send_connect_command().await;
+        if let Ok(msg) = &response {
+            if let Some(ref status) = msg.get_status() {
+                trace!(target: "rtmp::Connection", "connect command response: {:?}", status);
+                if status.code == "NetConnection.Connect.Success" {
+                    trace!(target: "rtmp::Connection", "setting is_connected: {}", true);
+                    self.set_connected(true);
+                } else {
+                    self.set_connected(false);
+                }
+            }
+        }
+        response
+    }
+
+    // std API that returns immediately, then calls callback later
+    pub fn connect_with_callback(
+        &mut self,
+        f: impl Fn(Connection, Message) -> () + Send + 'static,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        trace!(target: "rtmp:connect_with_callback", "url: {}", self.url);
 
         // just block for now, while refactoring
         futures::executor::block_on(async move {
-            // queue the connect command, then await ...
-            // - handshake completion
-            // - queued command gets sent in process_message_loop
-            // - receive connect response
-            let response = self.send_connect_command().await;
+            let response = self.connect().await;
+            // TODO: need to figure out client error handling expectations
             if let Ok(msg) = response {
-                if let Some(ref status) = msg.get_status() {
-                    trace!(target: "rtmp::Connection", "connect command response: {:?}", status);
-                    if status.code == "NetConnection.Connect.Success" {
-                        trace!(target: "rtmp::Connection", "setting is_connected: {}", true);
-                        self.set_connected(true);
-                    } else {
-                        self.set_connected(false);
-                    }
-                }
+                trace!(target: "rtmp:connect_with_callback", "connected: {}, {:#?}", self.is_connected(), msg);
+                // want: Message::from_data(msg)
+                f(
+                    self.clone(),
+                    Message {
+                        stream_id: 0,
+                        data: MessageData::Response(msg.clone()),
+                    },
+                );
             }
         });
 
