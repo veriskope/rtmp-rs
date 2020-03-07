@@ -1,5 +1,4 @@
 use log::{trace, warn};
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use url::Url;
 
@@ -7,7 +6,6 @@ use tokio::prelude::*;
 use tokio::sync::mpsc;
 use tokio::{io::BufReader, net::TcpStream};
 
-use crate::amf::Value;
 use crate::chunk::{Chunk, Signal};
 use crate::message::*;
 
@@ -38,47 +36,20 @@ impl InnerConnection {
             .expect("tcp connection failed");
         tcp.set_nodelay(true).expect("set_nodelay call failed");
 
-        InnerConnection {
+        let mut cn = InnerConnection {
             url,
             rx_to_server,
             cn: BufReadWriter::new(BufReader::new(tcp)),
             window_ack_size: 2500000,
             chunk_size: 1024, // TODO: is this a good default?
             is_connected: AtomicBool::new(false),
-        }
+        };
+        cn.connect_handshake().await.unwrap();
+        cn
     }
 
     fn is_connected(&self) -> bool {
         self.is_connected.load(Ordering::SeqCst)
-    }
-
-    // async fn send_connect_command(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-    async fn send_connect_command(&mut self) -> io::Result<()> {
-        trace!(target: "rtmp::Connection", "send_connect_command");
-
-        let mut properties = HashMap::new();
-        let mut url_path = self.url.path_segments().unwrap();
-        let app_name = url_path.next().unwrap();
-        properties.insert("app".to_string(), Value::Utf8(app_name.to_string()));
-        let flash_version = "MAC 10,0,32,18".to_string(); // TODO: must we, really?
-        properties.insert("flashVer".to_string(), Value::Utf8(flash_version));
-        // properties.insert("objectEncoding".to_string(), Amf0Value::Number(0.0));
-        properties.insert("tcUrl".to_string(), Value::Utf8(self.url.to_string()));
-
-        let msg = Message::new(
-            None,
-            MessageData::Command(MessageCommand {
-                name: "connect".to_string(),
-                id: 1.0,
-                data: Value::Object(properties),
-                opt: Vec::new(),
-            }),
-        );
-
-        Chunk::write(&mut self.cn.buf, Chunk::Msg(msg))
-            .await
-            .expect("chunk write");
-        Ok(())
     }
 
     async fn handle_chunk(
@@ -142,27 +113,22 @@ impl InnerConnection {
         // <---- Set Peer Bandwidth from server
         // ----> Set Peer Bandwidth send to server
         loop {
-            if self.is_connected() {
-                tokio::select! {
-                    Some(outgoing_msg) = self.rx_to_server.recv()  => {
-                      trace!(target: "rtmp::Connection", "outgoing message: {:?}", outgoing_msg);
-                      // TODO: this shouldn't be synchronous
-                      let mut tmp_buf = Vec::new();
-                      Chunk::write(&mut tmp_buf, Chunk::Msg(outgoing_msg.clone())).await?;
-                      trace!(target: "rtmp::Connection", "outgoing bytes: {:02x?}", tmp_buf);
-                      trace!(target: "rtmp::Connection", "num bytes: {:?}", tmp_buf.len());
+            tokio::select! {
+                Some(outgoing_msg) = self.rx_to_server.recv()  => {
+                    trace!(target: "rtmp::Connection", "outgoing message: {:?}", outgoing_msg);
+                    // TODO: this shouldn't be synchronous
+                    let mut tmp_buf = Vec::new();
+                    Chunk::write(&mut tmp_buf, Chunk::Msg(outgoing_msg.clone())).await?;
+                    trace!(target: "rtmp::Connection", "outgoing bytes: {:02x?}", tmp_buf);
+                    trace!(target: "rtmp::Connection", "num bytes: {:?}", tmp_buf.len());
 
-                      Chunk::write(&mut self.cn.buf, Chunk::Msg(outgoing_msg)).await?;
-                    }
-                    Ok(response) = Chunk::read(&mut self.cn.buf) => {
-                        // TODO: need to distinguish not enough data from real errors
-                        let (chunk, _num_bytes) = response;
-                        self.handle_chunk(chunk, tx.clone()).await?;
-                    }
+                    Chunk::write(&mut self.cn.buf, Chunk::Msg(outgoing_msg)).await?;
                 }
-            } else {
-                let (chunk, _num_bytes) = Chunk::read(&mut self.cn.buf).await?;
-                self.handle_chunk(chunk, tx.clone()).await?;
+                Ok(response) = Chunk::read(&mut self.cn.buf) => {
+                    // TODO: need to distinguish not enough data from real errors
+                    let (chunk, _num_bytes) = response;
+                    self.handle_chunk(chunk, tx.clone()).await?;
+                }
             }
         }
         // unreachable Ok(())
@@ -202,14 +168,6 @@ impl InnerConnection {
                 return Ok(());
             }
         }
-    }
-
-    //pub async fn connect(&mut self) -> Result<(), Error> {
-    // error[E0412]: cannot find type `Error` in this scope
-    pub async fn connect(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        self.connect_handshake().await.expect("handshake");
-        self.send_connect_command().await.expect("connect command");
-        Ok(())
     }
 }
 

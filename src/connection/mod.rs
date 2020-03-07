@@ -126,6 +126,30 @@ impl Connection {
         receiver.await?
     }
 
+    // connect must have transaction ID #1
+    async fn send_connect_command(
+        &mut self,
+        // params: Vec<Value>, TODO: check API, caller can send some kind of server params, not sure where they go
+    ) -> Result<MessageResponse, MessageError> {
+        let mut properties = HashMap::new();
+        let mut url_path = self.url.path_segments().unwrap();
+        let app_name = url_path.next().unwrap();
+        properties.insert("app".to_string(), Value::Utf8(app_name.to_string()));
+        let flash_version = "MAC 10,0,32,18".to_string(); // TODO: must we, really?
+        properties.insert("flashVer".to_string(), Value::Utf8(flash_version));
+        // properties.insert("objectEncoding".to_string(), Amf0Value::Number(0.0));
+        properties.insert("tcUrl".to_string(), Value::Utf8(self.url.to_string()));
+
+        self.send_raw_command(
+            CONNECTION_CHANNEL,
+            "connect",
+            Some(1),
+            Value::Object(properties),
+            Vec::new(),
+        )
+        .await
+    }
+
     // streams use transaction id = 0, success or error happens via status
     //
     pub async fn send_stream_command(
@@ -186,9 +210,11 @@ impl Connection {
         let url = self.url.clone();
         let runtime = Handle::current();
         let _cn_handle = runtime.spawn(async move {
-            trace!(target: "rtmp:connect_with_callback", "spawn socket handler");
+            trace!(target: "rtmp:spawn_socket_process_loop", "creating socket connection");
+            // maybe InnerConnection is chunkstream?
             let mut cn = InnerConnection::new(url, to_server_rx).await;
-            cn.connect().await.expect("rtmp connection");
+
+            trace!(target: "rtmp:spawn_socket_process_loop", "chunkstream connected");
             cn.process_message_loop(from_server_tx)
                 .await
                 .expect("read until socket closes");
@@ -265,6 +291,15 @@ impl Connection {
 
         self.spawn_socket_process_loop(to_server_rx, from_server_tx);
         self.spawn_message_receiver(f, from_server_rx);
+
+        // just block for now, while refactoring
+        futures::executor::block_on(async move {
+            // queue the connect command, then await ...
+            // - handshake completion
+            // - queued command gets sent in process_message_loop
+            // - receive connect response
+            self.send_connect_command().await.expect("connect command");
+        });
 
         Ok(())
     }
