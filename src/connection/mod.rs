@@ -26,17 +26,17 @@ const CHANNEL_SIZE: usize = 100;
 type CommandsAwaitingResponse =
     HashMap<u32, oneshot::Sender<Result<MessageResponse, MessageError>>>;
 
-type StreamsAwaitingStatus = HashMap<u32, mpsc::Sender<MessageStatus>>;
+type Streams = HashMap<u32, mpsc::Sender<MessageStatus>>;
 
 #[derive(Clone, Debug)]
 pub struct Connection {
     url: Url,
     is_connected: Arc<AtomicBool>,
     next_cmd_id: Arc<AtomicU32>,
-    to_server_tx: Option<mpsc::Sender<Message>>, // messages destined server go here
+    to_server_tx: Option<mpsc::Sender<Message>>, // messages destined server go her
     // stream_callback: fn(NetStream, Message) -> (),
     commands_awaiting_response: Arc<Mutex<CommandsAwaitingResponse>>,
-    streams_awaiting_status: Arc<Mutex<StreamsAwaitingStatus>>,
+    streams: Arc<Mutex<Streams>>,
 }
 
 // how to support closure as well as functions?
@@ -68,7 +68,7 @@ impl Connection {
             next_cmd_id: Arc::new(AtomicU32::new(2)),
             to_server_tx: None,
             commands_awaiting_response: Default::default(),
-            streams_awaiting_status: Default::default(),
+            streams: Default::default(),
         }
     }
 
@@ -193,11 +193,7 @@ impl Connection {
                 ..
             } => {
                 let id = stream_id as u32;
-                let stream = NetStream::new(id, self.clone());
-                self.streams_awaiting_status
-                    .lock()
-                    .await
-                    .insert(id, stream.notify.clone());
+                let stream = NetStream::new(id, self.clone()).await;
                 Ok((stream, msg))
             }
             MessageResponse { opt: _, .. } => Err(MessageError::new_status(
@@ -205,6 +201,16 @@ impl Connection {
                 "Server did not provide a stream id number",
             )),
         }
+    }
+
+    pub(crate) async fn add_stream(&self, id: u32) -> mpsc::Receiver<MessageStatus> {
+        let (sender, receiver) = mpsc::channel(100);
+        self.streams.lock().await.insert(id, sender);
+        receiver
+    }
+
+    pub(crate) async fn remove_stream(&self, id: u32) {
+        self.streams.lock().await.remove(&id);
     }
 
     //     to_server_rx: ownership moves to the spawned thread, its job is to
@@ -256,7 +262,7 @@ impl Connection {
                         if stream_id == 0 {
                             panic!("unexpected status with stream id 0");   // TODO: I think this means it is a NetConnection status message
                         } else {
-                            if let Some(sender) = connection.streams_awaiting_status.lock().await.get_mut(&stream_id) {
+                            if let Some(sender) = connection.streams.lock().await.get_mut(&stream_id) {
                                 trace!(target: "rtmp:message_receiver", "sending...");
 
                                 if sender.send(status).await.is_err() {

@@ -3,30 +3,67 @@ use crate::amf::Value;
 use crate::message::*;
 use crate::Connection;
 pub use flag::RecordFlag;
-use log::{trace, warn};
+// use futures::sink::Sink;
+use futures::stream::{Stream, StreamExt};
+use log::trace;
 use std::fmt;
-use std::sync::Arc;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use tokio::runtime::Handle;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::mpsc;
 
-#[derive(Clone)]
 pub struct NetStream {
     id: u32,
     cn: Connection,
-    pub notify: mpsc::Sender<MessageStatus>,
-    state: Arc<RwLock<NetStreamState>>,
+    messages: mpsc::Receiver<MessageStatus>,
+    state: NetStreamState,
 }
+
+impl Stream for NetStream {
+    type Item = MessageStatus;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+        self.messages.poll_next_unpin(cx)
+    }
+}
+
+impl Drop for NetStream {
+    fn drop(&mut self) {
+        let cn = self.cn.clone();
+        let id = self.id;
+        Handle::current().spawn(async move {
+            cn.remove_stream(id).await;
+        });
+    }
+}
+
+// impl Sink<MessageData> for NetStream {
+//     type Error = std::convert::Infallible;
+
+//     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+//         self.connection.poll_stream_ready(cx)
+//     }
+
+//     fn start_send(self: Pin<&mut Self>, item: MessageData) -> Result<(), Self::Error> {
+//         unimplemented!()
+//     }
+
+//     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+//         Poll::Ready(Ok(()))
+//     }
+
+//     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+//         Poll::Ready(Ok(()))
+//     }
+// }
 
 impl fmt::Debug for NetStream {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        futures::executor::block_on(async move {
-            let state_ref = self.state.read().await;
-            write!(
-                f,
-                "NetStream {{ id: {}, state: {:?} }}",
-                self.id, *state_ref
-            )
-        })
+        write!(
+            f,
+            "NetStream {{ id: {}, state: {:?} }}",
+            self.id, self.state
+        )
     }
 }
 
@@ -34,7 +71,7 @@ impl fmt::Debug for NetStream {
 pub enum NetStreamState {
     Created,
     PublishRequest(PublishInfo),
-    Published(PublishInfo),
+    // Published(PublishInfo),
 }
 
 impl Default for NetStreamState {
@@ -51,62 +88,46 @@ pub struct PublishInfo {
 
 use NetStreamState::*;
 impl NetStream {
-    // called for every status message received on this stream
-    async fn handle_message(&self, msg_status: MessageStatus) {
-        // MessageStatus for stream
+    // // called for every status message received on this stream
+    // async fn handle_message(&self, msg_status: MessageStatus) {
+    //     // MessageStatus for stream
 
-        if msg_status.code == "NetStream.Publish.Start" {
-            {
-                let mut state_ref = self.state.write().await;
-                trace!(target: "NetStream::receiver", "recv stream *state_ref = {:?}", *state_ref);
-                let old_state = (*state_ref).clone();
-                if let PublishRequest(info) = old_state {
-                    *state_ref = Published(info.clone());
-                } else {
-                    warn!("state should be PublishRequest");
-                }
-            }
-            trace!(target: "NetStream::receiver", "end Some(msg_status), stream: {:?}", self);
-        }
-    }
+    //     if msg_status.code == "NetStream.Publish.Start" {
+    //         {
+    //             let mut state_ref = self.state.write().await;
+    //             trace!(target: "NetStream::receiver", "recv stream *state_ref = {:?}", *state_ref);
+    //             let old_state = (*state_ref).clone();
+    //             if let PublishRequest(info) = old_state {
+    //                 *state_ref = Published(info.clone());
+    //             } else {
+    //                 warn!("state should be PublishRequest");
+    //             }
+    //         }
+    //         trace!(target: "NetStream::receiver", "end Some(msg_status), stream: {:?}", self);
+    //     }
+    // }
 
-    pub fn new(id: u32, cn: Connection) -> Self {
-        let (tx, mut rx) = mpsc::channel::<MessageStatus>(100);
-        let new_stream = Self {
+    pub async fn new(id: u32, cn: Connection) -> Self {
+        let messages = cn.add_stream(id).await;
+        Self {
             id,
             cn,
-            notify: tx,
+            messages,
             state: Default::default(),
-        };
-
-        let stream = new_stream.clone(); // xfer to closure
-        Handle::current().spawn(async move {
-            loop {
-                let option = rx.recv().await; // why would this ever be None?
-                trace!(target: "NetStream::receiver", "recv stream option = {:#?}", option);
-                if let Some(msg_status) = option {
-                    trace!(target: "NetStream::receiver", "recv stream msg = {:#?}", msg_status);
-                    stream.handle_message(msg_status).await;
-                }
-            }
-        });
-        new_stream
+        }
     }
 
     // TODO: Rename `publish_request` or change waits to receive
     // message from server and return success/failure message
     pub async fn publish(&mut self, name: &str, flag: RecordFlag) -> Result<(), MessageError> {
         trace!(target: "NetStream::publish", "{}: {}", name, flag);
-        let mut state_ref = self.state.write().await;
-
-        let result = match *state_ref {
+        let result = match self.state {
             Created => {
                 let params = vec![Value::Utf8(name.into()), Value::Utf8(flag.to_string())];
-                *state_ref = PublishRequest(PublishInfo {
+                self.state = PublishRequest(PublishInfo {
                     name: name.to_string(),
                     flag,
                 });
-                drop(state_ref);
                 let response = self
                     .cn
                     .send_stream_command(self.id, "publish", params)
