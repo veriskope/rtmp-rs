@@ -114,6 +114,14 @@ impl From<RecvError> for MessageError {
     }
 }
 
+impl std::error::Error for MessageError {}
+
+impl fmt::Display for MessageError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "An error occurred: {}", self.0.description)
+    }
+}
+
 // enum StatusCode {
 //     Success,
 //     Failed,
