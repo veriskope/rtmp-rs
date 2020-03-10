@@ -1,6 +1,4 @@
 extern crate pretty_env_logger;
-use std::thread::sleep;
-use std::time::Duration;
 use url::Url;
 
 fn main() {
