@@ -109,7 +109,7 @@ impl NetStream {
                 drop(state_ref);
                 let response = self
                     .cn
-                    .send_stream_command(Some(self.id), "publish", params)
+                    .send_stream_command(self.id, "publish", params)
                     .await?;
                 trace!("{:?}", response);
                 Ok(response)

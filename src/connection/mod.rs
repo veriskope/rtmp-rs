@@ -161,10 +161,9 @@ impl Connection {
     }
 
     // streams use transaction id = 0, success or error happens via status
-    //
     pub async fn send_stream_command(
         &mut self,
-        stream_id: Option<u32>,
+        stream_id: u32,
         name: &str,
         params: Vec<Value>,
     ) -> Result<(), MessageError> {
@@ -174,7 +173,7 @@ impl Connection {
         };
 
         let msg = Message::new(
-            stream_id,
+            Some(stream_id),
             MessageData::Command(MessageCommand {
                 name: name.to_string(),
                 id: 0.0,
