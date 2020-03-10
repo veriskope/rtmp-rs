@@ -35,7 +35,7 @@ async fn main() {
 
   let url = "rtmp://localhost/live"
   let conn = rtmp::Connection::new(url).await?;
-  // optional set timeout to 1 sec: conn.set_timeout(1000);  
+  // optional set timeout to 1 sec: conn.set_timeout(1000);
   conn.connect().await?;
   let result = conn.send_command("get_user_info", ["fred"]).await?
   match result {
@@ -50,8 +50,18 @@ async fn main() {
 - how to run some code before test run?  (for logging, I currently add `pretty_env_logger::init();` in the code of the test)
 - I've gotten a bit fast-and-loose with adding crates, would like to consider
   reducing dependencies once the basics are working
-- maybe use procedural macro to implement reading/writing of chunks with less 
+- maybe use procedural macro to implement reading/writing of chunks with less
   boilerplate code
+
+## Running the server
+
+```
+git clone git@github.com:veriskope/docker-adobe-media-server.git
+cd docker-adobe-media-server
+docker-compose up
+```
+
+
 
 # License
 
@@ -61,5 +71,5 @@ This library is distributed under same terms as the Rust language, under both th
 
 Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in this repository by you, shall be dual licensed as MIT and Apache 2.0, without any additional terms or conditions.
 
- 
+
 
