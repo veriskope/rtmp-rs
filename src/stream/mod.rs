@@ -13,7 +13,7 @@ use tokio::runtime::Handle;
 use tokio::sync::mpsc;
 
 pub struct NetStream {
-    id: u32,
+    pub id: u32,
     cn: Connection,
     messages: mpsc::Receiver<MessageStatus>,
     state: NetStreamState,
