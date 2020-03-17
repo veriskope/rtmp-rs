@@ -9,10 +9,9 @@ edition = "2018"
 [dependencies]
 tokio = { version = "0.2", features = ["full"] }
 log = "0.4"
-pretty_env_logger = "0.3"
 
 # TODO: make this optional?  should this crate have a feature for tls?
-tokio-tls = "0.3"  
+tokio-tls = "0.3"
 native-tls = "0.2.3"
 
 byteorder = "1.2.1"   # TODO: removing? we may have all we need built-in now
@@ -27,3 +26,6 @@ num-traits = "0.2.11"
 url = "2.1.1"
 derive_more = "0.99.2"
 futures = "0.3.4"
+
+[dev-dependencies]
+pretty_env_logger = "0.3"
